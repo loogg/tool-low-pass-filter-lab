@@ -1152,6 +1152,45 @@ footer {
   font-size: 10px;
 }
 
+.magnitude-card .chart-card-heading {
+  flex-wrap: wrap;
+}
+
+.db-formula-panel {
+  display: grid;
+  flex: 1 1 205px;
+  gap: 3px;
+  max-width: 250px;
+  margin-left: auto;
+  padding: 9px 11px;
+  color: var(--teal-dark);
+  border: 1px solid rgba(10, 163, 154, 0.14);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(10, 163, 154, 0.075), rgba(215, 245, 109, 0.08));
+}
+
+.db-formula-panel > span {
+  color: #6b817b;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.db-formula-panel code {
+  color: var(--ink-deep);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.db-formula-panel small {
+  margin-top: 2px;
+  color: #7a8984;
+  font-size: 7.5px;
+  line-height: 1.45;
+}
+
 .chart-pair {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1218,6 +1257,49 @@ footer {
   font-weight: 600;
 }
 
+.chart-annotation-connector {
+  stroke: var(--annotation-color);
+  stroke-width: 1.2;
+  stroke-dasharray: 2 3;
+  opacity: 0.65;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-annotation-halo {
+  fill: var(--annotation-color);
+  opacity: 0.14;
+}
+
+.chart-annotation-dot {
+  fill: #fffdf7;
+  stroke: var(--annotation-color);
+  stroke-width: 2.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-annotation-box {
+  fill: rgba(255, 253, 247, 0.96);
+  stroke: var(--annotation-color);
+  stroke-opacity: 0.42;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-annotation-label,
+.chart-annotation-detail {
+  font-family: var(--mono);
+}
+
+.chart-annotation-label {
+  fill: #173b39;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.chart-annotation-detail {
+  fill: #70817c;
+  font-size: 8.5px;
+}
+
 .chart-hover-line {
   stroke: rgba(20, 51, 51, 0.32);
   stroke-width: 1;
@@ -1261,6 +1343,45 @@ footer {
   height: 3px;
   border-radius: 99px;
   background: var(--legend-color);
+}
+
+.db-conversion-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 10px 0;
+  overflow: hidden;
+  border: 1px solid rgba(10, 119, 114, 0.12);
+  border-radius: 12px;
+  background: rgba(10, 119, 114, 0.035);
+}
+
+.db-conversion-strip > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 11px;
+}
+
+.db-conversion-strip > div + div {
+  border-left: 1px solid rgba(10, 119, 114, 0.1);
+}
+
+.db-conversion-strip code {
+  color: #b56227;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.db-conversion-strip strong {
+  color: var(--ink-deep);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.db-conversion-strip small {
+  color: #7c8c87;
+  font-size: 8px;
 }
 
 .chart-takeaway {
@@ -2509,6 +2630,13 @@ footer > a {
 
   .chart-card-heading > code {
     display: none;
+  }
+
+  .db-formula-panel {
+    flex-basis: 100%;
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
   }
 
   .chart-card-heading p {

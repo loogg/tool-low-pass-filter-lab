@@ -25,6 +25,13 @@ describe('first-order low-pass relationships', () => {
     expect(phaseDegreesAt(10, 10)).toBeCloseTo(-45, 8)
   })
 
+  it('maps each decade above cutoff to roughly one tenth amplitude', () => {
+    expect(magnitudeAt(100, 10)).toBeCloseTo(0.1, 2)
+    expect(gainDbAt(100, 10)).toBeCloseTo(-20.043, 2)
+    expect(magnitudeAt(1000, 10)).toBeCloseTo(0.01, 3)
+    expect(gainDbAt(1000, 10)).toBeCloseTo(-40, 2)
+  })
+
   it('calculates both discrete coefficients', () => {
     expect(alphaZoh(2.5, 100)).toBeCloseTo(0.14536, 4)
     expect(alphaBackwardEuler(2.5, 100)).toBeCloseTo(0.13576, 4)

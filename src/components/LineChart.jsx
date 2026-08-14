@@ -22,6 +22,10 @@ function nearestPoint(data, targetX) {
   return nearest
 }
 
+function clampPosition(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value))
+}
+
 export default function LineChart({
   series,
   xDomain,
@@ -33,6 +37,7 @@ export default function LineChart({
   formatY = (value) => String(value),
   ariaLabel,
   referenceLines = [],
+  pointAnnotations = [],
   playing = false,
   showPlayhead = false,
 }) {
@@ -78,6 +83,48 @@ export default function LineChart({
     : series.map((item) => ({ ...item, point: nearestPoint(item.data, hoverX) }))
   const hoverPixel = hoverX === null ? null : scaleX(hoverX)
   const tooltipOnLeft = hoverPixel !== null && hoverPixel > VIEWBOX_WIDTH * 0.66
+  const annotationGeometry = pointAnnotations.map((annotation) => {
+    const pointX = scaleX(annotation.x)
+    const pointY = scaleY(annotation.y)
+    const boxWidth = annotation.width ?? 96
+    const boxHeight = annotation.detail ? 38 : 26
+    const align = annotation.align ?? (
+      pointX > MARGIN.left + plotWidth * 0.68 ? 'left' : 'right'
+    )
+    const placement = annotation.placement ?? (
+      pointY < MARGIN.top + boxHeight + 18 ? 'below' : 'above'
+    )
+    const requestedBoxX = align === 'left'
+      ? pointX - boxWidth - 12
+      : pointX + 12
+    const requestedBoxY = placement === 'below'
+      ? pointY + 12
+      : pointY - boxHeight - 12
+    const boxX = clampPosition(
+      requestedBoxX,
+      MARGIN.left + 4,
+      MARGIN.left + plotWidth - boxWidth - 4,
+    )
+    const boxY = clampPosition(
+      requestedBoxY,
+      MARGIN.top + 4,
+      MARGIN.top + plotHeight - boxHeight - 4,
+    )
+    const connectorX = clampPosition(pointX, boxX, boxX + boxWidth)
+    const connectorY = clampPosition(pointY, boxY, boxY + boxHeight)
+
+    return {
+      ...annotation,
+      pointX,
+      pointY,
+      boxX,
+      boxY,
+      boxWidth,
+      boxHeight,
+      connectorX,
+      connectorY,
+    }
+  })
 
   function handlePointerMove(event) {
     const bounds = event.currentTarget.getBoundingClientRect()
@@ -195,6 +242,59 @@ export default function LineChart({
             </text>
           ) : null,
         )}
+
+        {annotationGeometry.map((annotation) => (
+          <g
+            key={`${annotation.x}-${annotation.y}-${annotation.label}`}
+            className="chart-point-annotation"
+            style={{ '--annotation-color': annotation.color ?? '#0aa39a' }}
+            aria-hidden="true"
+          >
+            <line
+              className="chart-annotation-connector"
+              x1={annotation.pointX}
+              y1={annotation.pointY}
+              x2={annotation.connectorX}
+              y2={annotation.connectorY}
+            />
+            <circle
+              className="chart-annotation-halo"
+              cx={annotation.pointX}
+              cy={annotation.pointY}
+              r="8"
+            />
+            <circle
+              className="chart-annotation-dot"
+              cx={annotation.pointX}
+              cy={annotation.pointY}
+              r="3.5"
+            />
+            <rect
+              className="chart-annotation-box"
+              x={annotation.boxX}
+              y={annotation.boxY}
+              width={annotation.boxWidth}
+              height={annotation.boxHeight}
+              rx="8"
+            />
+            <text
+              className="chart-annotation-label"
+              x={annotation.boxX + 9}
+              y={annotation.boxY + (annotation.detail ? 16 : 17)}
+            >
+              {annotation.label}
+            </text>
+            {annotation.detail ? (
+              <text
+                className="chart-annotation-detail"
+                x={annotation.boxX + 9}
+                y={annotation.boxY + 30}
+              >
+                {annotation.detail}
+              </text>
+            ) : null}
+          </g>
+        ))}
 
         {hoverPixel !== null ? (
           <g

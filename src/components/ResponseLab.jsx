@@ -2,6 +2,7 @@ import { Activity, CircleHelp, Gauge, MoveDownRight, Timer } from 'lucide-react'
 import {
   createFrequencyResponse,
   createStepResponse,
+  gainDbAt,
   magnitudeAt,
   phaseDegreesAt,
   settlingTime,
@@ -36,6 +37,32 @@ export default function ResponseLab({ cutoffHz }) {
   }]
 
   const frequencyTicks = [cutoffHz / 100, cutoffHz / 10, cutoffHz, cutoffHz * 10, cutoffHz * 100]
+  const magnitudeAnnotations = [
+    {
+      x: cutoffHz,
+      y: gainDbAt(cutoffHz, cutoffHz),
+      label: '≈ 0.707×',
+      detail: '−3 dB',
+      color: '#f29a4a',
+      placement: 'below',
+    },
+    {
+      x: cutoffHz * 10,
+      y: gainDbAt(cutoffHz * 10, cutoffHz),
+      label: '≈ 1/10',
+      detail: '−20 dB',
+      color: '#0a7772',
+      align: 'left',
+    },
+    {
+      x: cutoffHz * 100,
+      y: gainDbAt(cutoffHz * 100, cutoffHz),
+      label: '≈ 1/100',
+      detail: '−40 dB',
+      color: '#0a7772',
+      align: 'left',
+    },
+  ]
 
   return (
     <section id="response" className="content-section">
@@ -99,10 +126,15 @@ export default function ResponseLab({ cutoffHz }) {
       </article>
 
       <div className="chart-pair">
-        <article className="chart-card">
+        <article className="chart-card magnitude-card">
           <div className="chart-card-heading compact">
             <div><span className="chart-index">B</span><div><h3>幅频响应</h3><p>每种频率最后还剩多少幅值。</p></div></div>
-            <code>|H| → dB</code>
+            <aside className="db-formula-panel" aria-label="分贝与幅值倍数换算公式">
+              <span>幅值比 ↔ dB</span>
+              <code>G<sub>dB</sub> = 20 log<sub>10</sub>|H|</code>
+              <code>|H| = 10<sup>G<sub>dB</sub>/20</sup></code>
+              <small>功率比使用 10 log<sub>10</sub>(P<sub>out</sub>/P<sub>in</sub>)</small>
+            </aside>
           </div>
           <LineChart
             series={gainSeries}
@@ -114,9 +146,27 @@ export default function ResponseLab({ cutoffHz }) {
             formatX={(value) => `${formatNumber(value / cutoffHz, 2)}×fc`}
             formatY={(value) => `${formatNumber(value, 1)} dB`}
             referenceLines={[{ axis: 'x', value: cutoffHz, label: 'fc', color: '#f29a4a' }]}
+            pointAnnotations={magnitudeAnnotations}
             ariaLabel="一阶低通滤波器的幅频响应曲线"
           />
-          <p className="under-chart-note"><strong>过了 fc 以后：</strong>每提高 10 倍频率，幅值约再下降 20 dB。</p>
+          <div className="db-conversion-strip" aria-label="常见分贝与倍数换算">
+            <div>
+              <code>−3 dB</code>
+              <strong>幅值 ≈ 0.707</strong>
+              <small>功率 ≈ 1/2</small>
+            </div>
+            <div>
+              <code>−20 dB</code>
+              <strong>幅值 ≈ 1/10</strong>
+              <small>功率 ≈ 1/100</small>
+            </div>
+            <div>
+              <code>−40 dB</code>
+              <strong>幅值 ≈ 1/100</strong>
+              <small>功率 ≈ 1/10,000</small>
+            </div>
+          </div>
+          <p className="under-chart-note"><strong>过了 fc 以后：</strong>频率每提高 10 倍，幅值约下降 20 dB，也就是变为前一档的约 <strong>1/10</strong>；对应功率约变为 <strong>1/100</strong>。</p>
         </article>
 
         <article className="chart-card">
