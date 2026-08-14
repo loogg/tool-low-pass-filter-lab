@@ -7,6 +7,7 @@ import {
   gainDbAt,
   magnitudeAt,
   phaseDegreesAt,
+  simulationFrequencyLimits,
   solveDesignConstraints,
   tauFromCutoff,
 } from './filterMath.js'
@@ -27,6 +28,11 @@ describe('first-order low-pass relationships', () => {
   it('calculates both discrete coefficients', () => {
     expect(alphaZoh(2.5, 100)).toBeCloseTo(0.14536, 4)
     expect(alphaBackwardEuler(2.5, 100)).toBeCloseTo(0.13576, 4)
+  })
+
+  it('keeps the simulator frequency range below Nyquist without an arbitrary cap', () => {
+    expect(simulationFrequencyLimits(100)).toEqual({ minimum: 0.1, maximum: 45 })
+    expect(simulationFrequencyLimits(10000)).toEqual({ minimum: 0.1, maximum: 4500 })
   })
 })
 
@@ -74,5 +80,37 @@ describe('discrete simulation', () => {
 
     expect(result.output.at(-1).y).toBeGreaterThan(0.999)
     expect(result.alpha).toBeCloseTo(alphaZoh(2.5, 100), 8)
+  })
+
+  it('applies configurable amplitude and square-wave duty cycle', () => {
+    const result = createSimulation({
+      cutoffHz: 20,
+      sampleRateHz: 1000,
+      inputType: 'square',
+      signalFrequencyHz: 10,
+      signalAmplitude: 1.5,
+      squareDutyCycle: 0.25,
+      durationSeconds: 1,
+      maxRenderedPoints: 2000,
+    })
+
+    const positiveSamples = result.input.filter((point) => point.y > 0).length
+    expect(Math.max(...result.input.map((point) => point.y))).toBe(1.5)
+    expect(Math.min(...result.input.map((point) => point.y))).toBe(-1.5)
+    expect(positiveSamples / result.input.length).toBeCloseTo(0.25, 1)
+  })
+
+  it('accepts signal and interference frequencies up to the sampling safety limit', () => {
+    const result = createSimulation({
+      cutoffHz: 2.5,
+      sampleRateHz: 100,
+      inputType: 'noise',
+      signalFrequencyHz: 40,
+      interferenceFrequencyHz: 44,
+      durationSeconds: 0.5,
+    })
+
+    expect(result.signalFrequency).toBe(40)
+    expect(result.interferenceFrequency).toBe(44)
   })
 })

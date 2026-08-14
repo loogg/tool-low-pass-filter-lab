@@ -55,6 +55,14 @@ export function phaseDelaySeconds(frequencyHz, cutoffHz) {
   return Math.abs(phaseDegreesAt(frequencyHz, cutoffHz)) / 360 / frequencyHz
 }
 
+export function simulationFrequencyLimits(sampleRateHz) {
+  const minimum = 0.1
+  return {
+    minimum,
+    maximum: Math.max(minimum, positive(sampleRateHz) * 0.45),
+  }
+}
+
 export function settlingTime(tauSeconds, fraction = 0.95) {
   const safeFraction = clamp(fraction, EPSILON, 1 - EPSILON)
   return -positive(tauSeconds) * Math.log(1 - safeFraction)
@@ -137,18 +145,32 @@ function deterministicNoise(index) {
   return (raw - Math.floor(raw)) * 2 - 1
 }
 
-function inputSample(type, time, duration, signalFrequency, noiseLevel, index) {
+function inputSample(
+  type,
+  time,
+  duration,
+  signalFrequency,
+  signalAmplitude,
+  noiseLevel,
+  interferenceFrequency,
+  squareDutyCycle,
+  stepTimeRatio,
+  index,
+) {
   if (type === 'step') {
-    return time >= duration * 0.12 ? 1 : 0
+    return time >= duration * stepTimeRatio ? signalAmplitude : 0
   }
 
   if (type === 'square') {
-    return Math.sin(TWO_PI * signalFrequency * time) >= 0 ? 1 : -1
+    const cyclePosition = (signalFrequency * time) % 1
+    return cyclePosition < squareDutyCycle ? signalAmplitude : -signalAmplitude
   }
 
-  const carrier = Math.sin(TWO_PI * signalFrequency * time)
-  const highFrequencyRipple = Math.sin(TWO_PI * signalFrequency * 9 * time) * noiseLevel * 0.42
-  return carrier + highFrequencyRipple + deterministicNoise(index) * noiseLevel
+  const carrier = Math.sin(TWO_PI * signalFrequency * time) * signalAmplitude
+  const noiseAmplitude = signalAmplitude * noiseLevel
+  const highFrequencyRipple =
+    Math.sin(TWO_PI * interferenceFrequency * time) * noiseAmplitude * 0.42
+  return carrier + highFrequencyRipple + deterministicNoise(index) * noiseAmplitude
 }
 
 export function createSimulation({
@@ -157,15 +179,40 @@ export function createSimulation({
   method = 'zoh',
   inputType = 'noise',
   signalFrequencyHz = 1,
+  signalAmplitude = 1,
   noiseLevel = 0.35,
+  interferenceFrequencyHz = 9,
+  squareDutyCycle = 0.5,
+  stepTimeRatio = 0.12,
+  cyclesToShow = 4,
   durationSeconds,
   maxRenderedPoints = 520,
 }) {
   const cutoff = positive(cutoffHz)
   const sampleRate = positive(sampleRateHz)
-  const signalFrequency = clamp(positive(signalFrequencyHz), 0.01, sampleRate * 0.45)
-  const duration =
-    durationSeconds ?? clamp(Math.max(5 * tauFromCutoff(cutoff), 4 / signalFrequency), 1.2, 8)
+  const frequencyLimits = simulationFrequencyLimits(sampleRate)
+  const signalFrequency = clamp(
+    positive(signalFrequencyHz),
+    frequencyLimits.minimum,
+    frequencyLimits.maximum,
+  )
+  const amplitude = clamp(positive(signalAmplitude), 0.01, 10)
+  const noise = clamp(noiseLevel, 0, 3)
+  const interferenceFrequency = clamp(
+    positive(interferenceFrequencyHz),
+    frequencyLimits.minimum,
+    frequencyLimits.maximum,
+  )
+  const dutyCycle = clamp(squareDutyCycle, 0.05, 0.95)
+  const stepStart = clamp(stepTimeRatio, 0.02, 0.8)
+  const visibleCycles = clamp(cyclesToShow, 2, 20)
+  const minimumDuration = 24 / sampleRate
+  const naturalDuration = inputType === 'step'
+    ? 6 * tauFromCutoff(cutoff)
+    : Math.max(5 * tauFromCutoff(cutoff), visibleCycles / signalFrequency)
+  const duration = durationSeconds === undefined
+    ? clamp(Math.max(naturalDuration, minimumDuration), minimumDuration, 8)
+    : positive(durationSeconds)
   const sampleCount = Math.max(2, Math.ceil(duration * sampleRate) + 1)
   const alpha = alphaForMethod(cutoff, sampleRate, method)
   const stride = Math.max(1, Math.ceil(sampleCount / maxRenderedPoints))
@@ -182,7 +229,11 @@ export function createSimulation({
       time,
       duration,
       signalFrequency,
-      noiseLevel,
+      amplitude,
+      noise,
+      interferenceFrequency,
+      dutyCycle,
+      stepStart,
       index,
     )
     filtered += alpha * (sample - filtered)
@@ -200,6 +251,8 @@ export function createSimulation({
     output,
     duration,
     alpha,
+    signalFrequency,
+    interferenceFrequency,
     inputRms: Math.sqrt(inputEnergy / sampleCount),
     outputRms: Math.sqrt(outputEnergy / sampleCount),
   }

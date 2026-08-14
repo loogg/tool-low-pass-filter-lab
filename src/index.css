@@ -1344,14 +1344,23 @@ footer {
 
 .simulator-layout {
   display: grid;
-  grid-template-columns: 270px minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
+  align-items: start;
 }
 
 .simulator-controls {
   display: flex;
   flex-direction: column;
   gap: 13px;
+}
+
+.simulator-tuning-grid {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 13px;
+  align-items: start;
 }
 
 .control-group {
@@ -1381,11 +1390,118 @@ footer {
   font-size: 11px;
 }
 
+.compact-number-input {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.compact-number-input:focus-within {
+  border-color: rgba(215, 245, 109, 0.48);
+  box-shadow: 0 0 0 3px rgba(215, 245, 109, 0.08);
+}
+
+.compact-number-input input {
+  width: 72px;
+  padding: 6px 4px 6px 8px;
+  color: var(--lime);
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.compact-number-input span {
+  padding-right: 7px;
+  color: #6f8b84;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
 .control-group p {
   margin: 7px 0 0;
   color: #79938c;
   font-size: 9px;
   line-height: 1.65;
+}
+
+.control-group-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: #b3c5c0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.control-group-heading small {
+  color: #66827b;
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.range-field {
+  padding-top: 14px;
+}
+
+.range-field + .range-field {
+  margin-top: 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.range-field .range-control {
+  margin-top: 9px;
+}
+
+.frequency-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.frequency-presets button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 8px;
+  color: #a9bdb7;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.frequency-presets button:hover,
+.frequency-presets button:focus-visible {
+  color: #eff6ed;
+  border-color: rgba(215, 245, 109, 0.3);
+  outline: 0;
+  background: rgba(215, 245, 109, 0.07);
+}
+
+.frequency-presets button span {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frequency-presets button small {
+  flex: 0 0 auto;
+  color: #69867f;
+  font-family: var(--mono);
+  font-size: 7px;
 }
 
 .stacked-options {
@@ -1458,12 +1574,18 @@ footer {
 
 .screen-topline {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 5px 12px;
   padding: 2px 4px 9px;
   color: #698981;
   font-family: var(--mono);
   font-size: 9px;
+}
+
+.screen-topline > span {
+  text-align: right;
 }
 
 .screen-topline div {
@@ -2236,11 +2358,12 @@ footer > a {
 
   .simulator-controls {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }
 
   .simulation-actions {
+    grid-column: 1 / -1;
     align-self: end;
   }
 
@@ -2412,6 +2535,14 @@ footer > a {
   .simulator-controls {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .simulator-tuning-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .simulation-actions {
+    grid-column: auto;
   }
 
   .scope-readouts {

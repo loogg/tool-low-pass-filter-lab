@@ -11,6 +11,13 @@ import { formatNumber, formatPercent, formatSeconds } from '../lib/format.js'
 import LineChart from './LineChart.jsx'
 import SectionIntro from './SectionIntro.jsx'
 
+function formatTauPosition(value, tau) {
+  if (value <= tau * 0.001) return '0'
+  const ratio = value / tau
+  const roundedRatio = Math.round(ratio)
+  return `${Math.abs(ratio - roundedRatio) < 0.001 ? roundedRatio : formatNumber(ratio, 2)}τ`
+}
+
 export default function ResponseLab({ cutoffHz }) {
   const tau = tauFromCutoff(cutoffHz)
   const time95 = settlingTime(tau, 0.95)
@@ -76,18 +83,18 @@ export default function ResponseLab({ cutoffHz }) {
           xDomain={[0, tau * 5]}
           yDomain={[0, 1.05]}
           xTicks={[0, tau, tau * 2, tau * 3, tau * 4, tau * 5]}
-          yTicks={[0, 0.25, 0.5, 0.632, 0.75, 0.95, 1]}
-          formatX={formatSeconds}
+          yTicks={[0, 0.25, 0.5, 0.632, 0.75, 1]}
+          formatX={(value) => formatTauPosition(value, tau)}
           formatY={(value) => formatPercent(value, 0)}
           referenceLines={[
-            { axis: 'x', value: tau, label: '1τ', color: '#f29a4a' },
-            { axis: 'x', value: tau * 3, label: '3τ ≈ 95%', color: '#d7f56d' },
+            { axis: 'x', value: tau, label: '63.2%', color: '#f29a4a' },
+            { axis: 'x', value: tau * 3, label: '≈ 95%', color: '#d7f56d' },
           ]}
           ariaLabel="一阶低通滤波器的单位阶跃响应曲线"
         />
         <div className="chart-takeaway">
           <span>读图结论</span>
-          <p>当前 τ 为 <strong>{formatSeconds(tau)}</strong>。大约 <strong>{formatSeconds(time95)}</strong> 后，输出已经“基本跟上”。</p>
+          <p>横轴每一格都是 <strong>1τ</strong>（当前为 {formatSeconds(tau)}）；到 <strong>3τ ≈ {formatSeconds(time95)}</strong> 时，输出已经“基本跟上”。</p>
         </div>
       </article>
 
