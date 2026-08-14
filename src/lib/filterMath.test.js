@@ -38,8 +38,8 @@ describe('first-order low-pass relationships', () => {
   })
 
   it('keeps the simulator frequency range below Nyquist without an arbitrary cap', () => {
-    expect(simulationFrequencyLimits(100)).toEqual({ minimum: 0.1, maximum: 45 })
-    expect(simulationFrequencyLimits(10000)).toEqual({ minimum: 0.1, maximum: 4500 })
+    expect(simulationFrequencyLimits(100)).toEqual({ minimum: 0.001, maximum: 45 })
+    expect(simulationFrequencyLimits(10000)).toEqual({ minimum: 0.001, maximum: 4500 })
   })
 })
 
@@ -119,5 +119,63 @@ describe('discrete simulation', () => {
 
     expect(result.signalFrequency).toBe(40)
     expect(result.interferenceFrequency).toBe(44)
+  })
+
+  it('bounds integration work for MHz sampling while preserving real sample statistics', () => {
+    const result = createSimulation({
+      cutoffHz: 1_000_000,
+      sampleRateHz: 100_000_000,
+      signalFrequencyHz: 500_000,
+      durationSeconds: 4,
+      maxRenderedPoints: 600,
+      maxIntegrationSteps: 2_000,
+    })
+
+    expect(result.sampleCount).toBe(400_000_001)
+    expect(result.simulatedSteps).toBeLessThanOrEqual(2_000)
+    expect(result.renderedPoints).toBeLessThanOrEqual(601)
+    expect(result.integrationStride).toBeGreaterThan(1)
+    expect(result.approximated).toBe(true)
+  })
+
+  it('applies signal offset, phase, and deterministic noise seed', () => {
+    const options = {
+      cutoffHz: 200,
+      sampleRateHz: 1_000,
+      signalFrequencyHz: 10,
+      signalAmplitude: 2,
+      signalOffset: 3,
+      signalPhaseDegrees: 90,
+      noiseLevel: 0.2,
+      noiseSeed: 42,
+      durationSeconds: 0.02,
+      maxRenderedPoints: 100,
+    }
+    const first = createSimulation(options)
+    const second = createSimulation(options)
+    const withoutNoise = createSimulation({ ...options, noiseLevel: 0 })
+
+    expect(first.input).toEqual(second.input)
+    expect(first.input[0].y).not.toBe(withoutNoise.input[0].y)
+    expect(withoutNoise.input[0].y).toBeCloseTo(5, 8)
+  })
+
+  it('uses configurable step levels and the recurrence initial state', () => {
+    const result = createSimulation({
+      cutoffHz: 2,
+      sampleRateHz: 100,
+      inputType: 'step',
+      stepInitialValue: -2,
+      stepFinalValue: 3,
+      stepTimeRatio: 0.5,
+      initialOutput: 4,
+      durationSeconds: 1,
+      maxRenderedPoints: 200,
+    })
+    const expectedFirstOutput = 4 + result.alpha * (-2 - 4)
+
+    expect(result.input[0].y).toBe(-2)
+    expect(result.input.at(-1).y).toBe(3)
+    expect(result.output[0].y).toBeCloseTo(expectedFirstOutput, 10)
   })
 })

@@ -1,6 +1,16 @@
 const TWO_PI = 2 * Math.PI
 const EPSILON = 1e-9
 
+export const CUTOFF_FREQUENCY_RANGE = Object.freeze({
+  minimum: 0.001,
+  maximum: 50_000_000,
+})
+
+export const SAMPLE_RATE_RANGE = Object.freeze({
+  minimum: 1,
+  maximum: 200_000_000,
+})
+
 export function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value))
 }
@@ -11,6 +21,14 @@ function positive(value, fallback = EPSILON) {
 
 export function tauFromCutoff(cutoffHz) {
   return 1 / (TWO_PI * positive(cutoffHz))
+}
+
+export function samplePeriodSeconds(sampleRateHz) {
+  return 1 / positive(sampleRateHz)
+}
+
+export function nyquistFrequency(sampleRateHz) {
+  return positive(sampleRateHz) / 2
 }
 
 export function cutoffFromTau(tauSeconds) {
@@ -55,8 +73,13 @@ export function phaseDelaySeconds(frequencyHz, cutoffHz) {
   return Math.abs(phaseDegreesAt(frequencyHz, cutoffHz)) / 360 / frequencyHz
 }
 
+export function groupDelaySecondsAt(frequencyHz, cutoffHz) {
+  const ratio = Math.max(0, frequencyHz) / positive(cutoffHz)
+  return tauFromCutoff(cutoffHz) / (1 + ratio * ratio)
+}
+
 export function simulationFrequencyLimits(sampleRateHz) {
-  const minimum = 0.1
+  const minimum = 0.001
   return {
     minimum,
     maximum: Math.max(minimum, positive(sampleRateHz) * 0.45),
@@ -140,53 +163,82 @@ export function createFrequencyResponse(cutoffHz, pointCount = 241) {
   })
 }
 
-function deterministicNoise(index) {
-  const raw = Math.sin(index * 12.9898 + 78.233) * 43758.5453
+function deterministicNoise(index, seed = 1) {
+  const raw = Math.sin((index + seed * 101.37) * 12.9898 + 78.233) * 43758.5453
   return (raw - Math.floor(raw)) * 2 - 1
 }
 
-function inputSample(
+function inputSample({
   type,
   time,
   duration,
   signalFrequency,
   signalAmplitude,
+  signalOffset,
+  signalPhaseDegrees,
   noiseLevel,
+  noiseSeed,
   interferenceFrequency,
+  interferenceLevel,
+  interferencePhaseDegrees,
   squareDutyCycle,
   stepTimeRatio,
+  stepInitialValue,
+  stepFinalValue,
   index,
-) {
+}) {
+  let baseSample
+  let referenceAmplitude
+
   if (type === 'step') {
-    return time >= duration * stepTimeRatio ? signalAmplitude : 0
+    baseSample = time >= duration * stepTimeRatio ? stepFinalValue : stepInitialValue
+    referenceAmplitude = Math.max(Math.abs(stepFinalValue - stepInitialValue), EPSILON)
+  } else if (type === 'square') {
+    const rawCyclePosition = signalFrequency * time + signalPhaseDegrees / 360
+    const cyclePosition = ((rawCyclePosition % 1) + 1) % 1
+    baseSample = signalOffset + (
+      cyclePosition < squareDutyCycle ? signalAmplitude : -signalAmplitude
+    )
+    referenceAmplitude = Math.max(signalAmplitude, EPSILON)
+  } else {
+    const phaseRadians = (signalPhaseDegrees * Math.PI) / 180
+    baseSample = signalOffset + (
+      Math.sin(TWO_PI * signalFrequency * time + phaseRadians) * signalAmplitude
+    )
+    referenceAmplitude = Math.max(signalAmplitude, EPSILON)
   }
 
-  if (type === 'square') {
-    const cyclePosition = (signalFrequency * time) % 1
-    return cyclePosition < squareDutyCycle ? signalAmplitude : -signalAmplitude
-  }
-
-  const carrier = Math.sin(TWO_PI * signalFrequency * time) * signalAmplitude
-  const noiseAmplitude = signalAmplitude * noiseLevel
-  const highFrequencyRipple =
-    Math.sin(TWO_PI * interferenceFrequency * time) * noiseAmplitude * 0.42
-  return carrier + highFrequencyRipple + deterministicNoise(index) * noiseAmplitude
+  const noise = deterministicNoise(index, noiseSeed) * referenceAmplitude * noiseLevel
+  const interferencePhase = (interferencePhaseDegrees * Math.PI) / 180
+  const interference = Math.sin(
+    TWO_PI * interferenceFrequency * time + interferencePhase,
+  ) * referenceAmplitude * interferenceLevel
+  return baseSample + noise + interference
 }
 
 export function createSimulation({
   cutoffHz,
   sampleRateHz,
   method = 'zoh',
-  inputType = 'noise',
+  inputType = 'sine',
   signalFrequencyHz = 1,
   signalAmplitude = 1,
-  noiseLevel = 0.35,
+  signalOffset = 0,
+  signalPhaseDegrees = 0,
+  noiseLevel = 0,
+  noiseSeed = 1,
   interferenceFrequencyHz = 9,
+  interferenceLevel = 0,
+  interferencePhaseDegrees = 0,
   squareDutyCycle = 0.5,
   stepTimeRatio = 0.12,
+  stepInitialValue = 0,
+  stepFinalValue = 1,
+  initialOutput = 0,
   cyclesToShow = 4,
   durationSeconds,
   maxRenderedPoints = 520,
+  maxIntegrationSteps = 50_000,
 }) {
   const cutoff = positive(cutoffHz)
   const sampleRate = positive(sampleRateHz)
@@ -196,54 +248,88 @@ export function createSimulation({
     frequencyLimits.minimum,
     frequencyLimits.maximum,
   )
-  const amplitude = clamp(positive(signalAmplitude), 0.01, 10)
-  const noise = clamp(noiseLevel, 0, 3)
+  const amplitude = clamp(Number.isFinite(signalAmplitude) ? Math.abs(signalAmplitude) : 1, 0, 1_000_000)
+  const offset = clamp(Number.isFinite(signalOffset) ? signalOffset : 0, -1_000_000, 1_000_000)
+  const signalPhase = clamp(Number.isFinite(signalPhaseDegrees) ? signalPhaseDegrees : 0, -3600, 3600)
+  const noise = clamp(Number.isFinite(noiseLevel) ? noiseLevel : 0, 0, 10)
+  const safeNoiseSeed = Math.round(clamp(Number.isFinite(noiseSeed) ? noiseSeed : 1, 0, 1_000_000))
   const interferenceFrequency = clamp(
     positive(interferenceFrequencyHz),
     frequencyLimits.minimum,
     frequencyLimits.maximum,
   )
+  const interference = clamp(
+    Number.isFinite(interferenceLevel) ? interferenceLevel : 0,
+    0,
+    10,
+  )
+  const interferencePhase = clamp(
+    Number.isFinite(interferencePhaseDegrees) ? interferencePhaseDegrees : 0,
+    -3600,
+    3600,
+  )
   const dutyCycle = clamp(squareDutyCycle, 0.05, 0.95)
   const stepStart = clamp(stepTimeRatio, 0.02, 0.8)
-  const visibleCycles = clamp(cyclesToShow, 2, 20)
+  const stepInitial = clamp(Number.isFinite(stepInitialValue) ? stepInitialValue : 0, -1_000_000, 1_000_000)
+  const stepFinal = clamp(Number.isFinite(stepFinalValue) ? stepFinalValue : 1, -1_000_000, 1_000_000)
+  const initialState = clamp(Number.isFinite(initialOutput) ? initialOutput : 0, -1_000_000, 1_000_000)
+  const visibleCycles = clamp(cyclesToShow, 0.25, 100)
   const minimumDuration = 24 / sampleRate
   const naturalDuration = inputType === 'step'
     ? 6 * tauFromCutoff(cutoff)
-    : Math.max(5 * tauFromCutoff(cutoff), visibleCycles / signalFrequency)
+    : visibleCycles / signalFrequency
   const duration = durationSeconds === undefined
-    ? clamp(Math.max(naturalDuration, minimumDuration), minimumDuration, 8)
-    : positive(durationSeconds)
-  const sampleCount = Math.max(2, Math.ceil(duration * sampleRate) + 1)
+    ? clamp(Math.max(naturalDuration, minimumDuration), minimumDuration, 1_000_000)
+    : clamp(positive(durationSeconds), minimumDuration, 1_000_000)
+  const sampleCount = Math.max(
+    2,
+    Math.ceil(Math.min(duration * sampleRate, Number.MAX_SAFE_INTEGER - 1)) + 1,
+  )
   const alpha = alphaForMethod(cutoff, sampleRate, method)
-  const stride = Math.max(1, Math.ceil(sampleCount / maxRenderedPoints))
+  const integrationLimit = Math.max(32, Math.round(maxIntegrationSteps))
+  const integrationStride = Math.max(1, Math.ceil(sampleCount / integrationLimit))
+  const simulatedSteps = Math.ceil(sampleCount / integrationStride)
+  const renderStride = Math.max(1, Math.ceil(simulatedSteps / maxRenderedPoints))
   const input = []
   const output = []
-  let filtered = 0
+  let filtered = initialState
   let inputEnergy = 0
   let outputEnergy = 0
+  let simulatedIndex = 0
 
-  for (let index = 0; index < sampleCount; index += 1) {
-    const time = index / sampleRate
-    const sample = inputSample(
-      inputType,
+  for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += integrationStride) {
+    const blockSize = Math.min(integrationStride, sampleCount - sampleIndex)
+    const endSampleIndex = sampleIndex + blockSize - 1
+    const time = Math.min(endSampleIndex / sampleRate, duration)
+    const sample = inputSample({
+      type: inputType,
       time,
       duration,
       signalFrequency,
-      amplitude,
-      noise,
+      signalAmplitude: amplitude,
+      signalOffset: offset,
+      signalPhaseDegrees: signalPhase,
+      noiseLevel: noise,
+      noiseSeed: safeNoiseSeed,
       interferenceFrequency,
-      dutyCycle,
-      stepStart,
-      index,
-    )
-    filtered += alpha * (sample - filtered)
-    inputEnergy += sample * sample
-    outputEnergy += filtered * filtered
+      interferenceLevel: interference,
+      interferencePhaseDegrees: interferencePhase,
+      squareDutyCycle: dutyCycle,
+      stepTimeRatio: stepStart,
+      stepInitialValue: stepInitial,
+      stepFinalValue: stepFinal,
+      index: simulatedIndex,
+    })
+    const blockAlpha = 1 - (1 - alpha) ** blockSize
+    filtered += blockAlpha * (sample - filtered)
+    inputEnergy += sample * sample * blockSize
+    outputEnergy += filtered * filtered * blockSize
 
-    if (index % stride === 0 || index === sampleCount - 1) {
+    if (simulatedIndex % renderStride === 0 || endSampleIndex === sampleCount - 1) {
       input.push({ x: time, y: sample })
       output.push({ x: time, y: filtered })
     }
+    simulatedIndex += 1
   }
 
   return {
@@ -253,6 +339,11 @@ export function createSimulation({
     alpha,
     signalFrequency,
     interferenceFrequency,
+    sampleCount,
+    simulatedSteps,
+    integrationStride,
+    renderedPoints: input.length,
+    approximated: integrationStride > 1,
     inputRms: Math.sqrt(inputEnergy / sampleCount),
     outputRms: Math.sqrt(outputEnergy / sampleCount),
   }

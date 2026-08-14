@@ -1,48 +1,71 @@
-import { Activity, Clock3, Cpu, Thermometer, Waves, Zap } from 'lucide-react'
-import { alphaForMethod, tauFromCutoff } from '../lib/filterMath.js'
-import { formatFrequency, formatNumber, formatSeconds } from '../lib/format.js'
+import EngineeringFrequencyInput from './EngineeringFrequencyInput.jsx'
+import {
+  alphaForMethod,
+  CUTOFF_FREQUENCY_RANGE,
+  groupDelaySecondsAt,
+  magnitudeAt,
+  nyquistFrequency,
+  phaseDegreesAt,
+  SAMPLE_RATE_RANGE,
+  samplePeriodSeconds,
+  settlingTime,
+  tauFromCutoff,
+} from '../lib/filterMath.js'
+import {
+  formatEngineeringRate,
+  formatFrequency,
+  formatNumber,
+  formatPercent,
+  formatSeconds,
+} from '../lib/format.js'
 
 const PRESETS = [
   {
     id: 'temperature',
     name: '温度采集',
-    description: '慢变量，优先稳定',
+    description: '低速传感器',
     cutoffHz: 0.5,
     sampleRateHz: 50,
-    icon: Thermometer,
   },
   {
     id: 'sensor',
-    name: '传感器平滑',
+    name: '通用采集',
     description: '响应与降噪折中',
     cutoffHz: 2.5,
     sampleRateHz: 100,
-    icon: Activity,
   },
   {
-    id: 'voltage',
-    name: '电压纹波',
-    description: '更快采样，观察纹波',
-    cutoffHz: 20,
-    sampleRateHz: 1000,
-    icon: Zap,
+    id: 'audio',
+    name: '音频包络',
+    description: 'kHz 级采样',
+    cutoffHz: 2_000,
+    sampleRateHz: 48_000,
+  },
+  {
+    id: 'power',
+    name: '高速采样',
+    description: 'MHz 级示例',
+    cutoffHz: 1_000_000,
+    sampleRateHz: 20_000_000,
   },
 ]
 
-function NumericInput({ value, onChange, min, max, step, suffix, ariaLabel }) {
+function Metric({ label, value, detail }) {
   return (
-    <label className="numeric-input">
-      <input
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        aria-label={ariaLabel}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-      <span>{suffix}</span>
-    </label>
+    <div className="calculation-metric">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+      {detail ? <small>{detail}</small> : null}
+    </div>
+  )
+}
+
+function MetricGroup({ eyebrow, title, children }) {
+  return (
+    <article className="calculation-group">
+      <header><span>{eyebrow}</span><h3>{title}</h3></header>
+      <dl>{children}</dl>
+    </article>
   )
 }
 
@@ -57,36 +80,37 @@ export default function ParameterDeck({
 }) {
   const tau = tauFromCutoff(cutoffHz)
   const alpha = alphaForMethod(cutoffHz, sampleRateHz, method)
-  const maxCutoff = Math.max(0.1, Math.min(200, sampleRateHz * 0.45))
-  const logarithmicCutoff = Math.log10(cutoffHz)
+  const samplePeriod = samplePeriodSeconds(sampleRateHz)
+  const nyquist = nyquistFrequency(sampleRateHz)
+  const time95 = settlingTime(tau, 0.95)
+  const time99 = settlingTime(tau, 0.99)
+  const frequencyRatio = cutoffHz / sampleRateHz
+  const samplingSafe = frequencyRatio <= 0.45
+  const cutoffMagnitude = magnitudeAt(cutoffHz, cutoffHz)
+  const cutoffPhase = phaseDegreesAt(cutoffHz, cutoffHz)
+  const cutoffGroupDelay = groupDelaySecondsAt(cutoffHz, cutoffHz)
 
   return (
     <section className="parameter-deck" aria-labelledby="parameter-deck-title">
       <div className="deck-heading">
         <div>
           <p className="eyebrow">全局实验参数</p>
-          <h2 id="parameter-deck-title">先转动唯一的“快慢旋钮”</h2>
-        </div>
-        <div className="live-pill">
-          <span className="status-dot" />
-          图表实时联动
+          <h2 id="parameter-deck-title">设置滤波器，再查看完整计算结果</h2>
+          <p className="deck-description">fc 与 fs 独立输入；数值输入支持 Hz、kHz、MHz。超出采样安全范围时只提示风险，不会自动改写你的参数。</p>
         </div>
       </div>
 
       <div className="parameter-grid">
         <div className="control-block control-block-primary">
-          <div className="control-title-row">
-            <div className="control-icon"><Waves size={18} /></div>
+          <div className="control-title-row is-plain">
             <div>
               <span className="control-kicker">截止频率</span>
               <strong>f<sub>c</sub></strong>
             </div>
-            <NumericInput
-              value={Number(cutoffHz.toFixed(3))}
-              min={0.1}
-              max={maxCutoff}
-              step={0.1}
-              suffix="Hz"
+            <EngineeringFrequencyInput
+              valueHz={cutoffHz}
+              minimumHz={CUTOFF_FREQUENCY_RANGE.minimum}
+              maximumHz={CUTOFF_FREQUENCY_RANGE.maximum}
               ariaLabel="截止频率"
               onChange={onCutoffChange}
             />
@@ -94,30 +118,30 @@ export default function ParameterDeck({
           <input
             className="range-control accent-orange"
             type="range"
-            min={-1}
-            max={Math.log10(maxCutoff)}
-            step={0.01}
-            value={logarithmicCutoff}
-            aria-label="以对数刻度调整截止频率"
+            min={Math.log10(CUTOFF_FREQUENCY_RANGE.minimum)}
+            max={Math.log10(CUTOFF_FREQUENCY_RANGE.maximum)}
+            step={0.001}
+            value={Math.log10(cutoffHz)}
+            aria-label="以宽量程对数刻度调整截止频率"
             onChange={(event) => onCutoffChange(10 ** Number(event.target.value))}
           />
-          <div className="range-scale"><span>0.1 Hz</span><span>{formatFrequency(maxCutoff)}</span></div>
-          <p>越低越平滑，越高越灵敏。其他所有参数都会跟着它变化。</p>
+          <div className="range-scale">
+            <span>{formatFrequency(CUTOFF_FREQUENCY_RANGE.minimum)}</span>
+            <span>{formatFrequency(CUTOFF_FREQUENCY_RANGE.maximum)}</span>
+          </div>
+          <p>连续域响应由 fc 决定；数字实现是否合理还要同时检查 fc / fs。</p>
         </div>
 
         <div className="control-block">
-          <div className="control-title-row">
-            <div className="control-icon"><Cpu size={18} /></div>
+          <div className="control-title-row is-plain">
             <div>
               <span className="control-kicker">采样频率</span>
               <strong>f<sub>s</sub></strong>
             </div>
-            <NumericInput
-              value={sampleRateHz}
-              min={10}
-              max={10000}
-              step={10}
-              suffix="Hz"
+            <EngineeringFrequencyInput
+              valueHz={sampleRateHz}
+              minimumHz={SAMPLE_RATE_RANGE.minimum}
+              maximumHz={SAMPLE_RATE_RANGE.maximum}
               ariaLabel="采样频率"
               onChange={onSampleRateChange}
             />
@@ -125,20 +149,22 @@ export default function ParameterDeck({
           <input
             className="range-control accent-lime"
             type="range"
-            min={1}
-            max={4}
-            step={0.01}
+            min={Math.log10(SAMPLE_RATE_RANGE.minimum)}
+            max={Math.log10(SAMPLE_RATE_RANGE.maximum)}
+            step={0.001}
             value={Math.log10(sampleRateHz)}
-            aria-label="以对数刻度调整采样频率"
-            onChange={(event) => onSampleRateChange(Math.round(10 ** Number(event.target.value)))}
+            aria-label="以宽量程对数刻度调整采样频率"
+            onChange={(event) => onSampleRateChange(10 ** Number(event.target.value))}
           />
-          <div className="range-scale"><span>10 Hz</span><span>10 kHz</span></div>
-          <p>决定每秒更新多少次，也决定数字系数 α 的实际含义。</p>
+          <div className="range-scale">
+            <span>{formatFrequency(SAMPLE_RATE_RANGE.minimum)}</span>
+            <span>{formatFrequency(SAMPLE_RATE_RANGE.maximum)}</span>
+          </div>
+          <p>fs 决定采样周期、奈奎斯特频率、每秒计算次数和数字系数 α。</p>
         </div>
 
         <div className="control-block">
-          <div className="control-title-row">
-            <div className="control-icon"><Clock3 size={18} /></div>
+          <div className="control-title-row is-plain method-title-row">
             <div>
               <span className="control-kicker">离散方法</span>
               <strong>α 计算</strong>
@@ -165,28 +191,64 @@ export default function ParameterDeck({
           <p className="method-formula">
             {method === 'zoh' ? 'α = 1 − exp(−2πfc / fs)' : 'α = 2πfc / (fs + 2πfc)'}
           </p>
-          <p>{method === 'zoh' ? '准确保持一阶系统的时间常数，适合传感器平滑。' : '公式简单且稳定，和 ZOH 会有少量映射差异。'}</p>
+          <p>{method === 'zoh' ? '准确保持一阶系统的时间常数。' : '计算简单且无条件稳定，但映射有少量偏差。'}</p>
         </div>
       </div>
 
-      <div className="derived-strip" aria-live="polite">
-        <div><Clock3 size={17} /><span>时间常数 τ</span><strong>{formatSeconds(tau)}</strong></div>
-        <div><Waves size={17} /><span>截止频率 fc</span><strong>{formatFrequency(cutoffHz)}</strong></div>
-        <div><Cpu size={17} /><span>数字系数 α</span><strong>{formatNumber(alpha, 6)}</strong></div>
-        <p>每次采样，输出向输入靠近差值的 <strong>{formatNumber(alpha * 100, 2)}%</strong>。</p>
-      </div>
+      <section className="calculation-board" aria-live="polite" aria-label="当前参数计算结果">
+        <header className="calculation-board-heading">
+          <div><span>CALCULATED VALUES</span><h3>由当前 fc、fs 与离散方法直接得到</h3></div>
+          <strong className={samplingSafe ? 'is-safe' : 'is-warning'}>
+            {samplingSafe ? '采样配置合理' : '警告：fc > 0.45fs'}
+          </strong>
+        </header>
+
+        <div className="calculation-groups">
+          <MetricGroup eyebrow="DIGITAL" title="数字实现">
+            <Metric label="采样周期 Ts" value={formatSeconds(samplePeriod)} detail="Ts = 1 / fs" />
+            <Metric label="数字系数 α" value={formatNumber(alpha, 8)} detail={method === 'zoh' ? 'ZOH 映射' : '后向欧拉'} />
+            <Metric label="频率比 fc/fs" value={formatNumber(frequencyRatio, 6)} detail="建议不高于 0.45" />
+            <Metric label="奈奎斯特频率" value={formatFrequency(nyquist)} detail="fs / 2" />
+          </MetricGroup>
+
+          <MetricGroup eyebrow="TIME DOMAIN" title="时域响应">
+            <Metric label="时间常数 τ" value={formatSeconds(tau)} detail="达到最终值 63.2%" />
+            <Metric label="达到 95%" value={formatSeconds(time95)} detail="严格值 2.996τ" />
+            <Metric label="达到 99%" value={formatSeconds(time99)} detail="严格值 4.605τ" />
+            <Metric label="fc 处群时延" value={formatSeconds(cutoffGroupDelay)} detail="一阶模拟原型 τ/2" />
+          </MetricGroup>
+
+          <MetricGroup eyebrow="FREQUENCY DOMAIN" title="幅相响应">
+            <Metric label="fc 处幅值" value={formatPercent(cutoffMagnitude, 2)} detail="−3.0103 dB" />
+            <Metric label="fc 处相位" value={`${formatNumber(cutoffPhase, 1)}°`} detail="输出滞后四分之一象限" />
+            <Metric label="高频滚降" value="−20 dB/dec" detail="频率每 ×10，幅值约 ÷10" />
+            <Metric label="极点角频率" value={`${formatNumber(2 * Math.PI * cutoffHz, 4)} rad/s`} detail="ωc = 2πfc" />
+          </MetricGroup>
+
+          <MetricGroup eyebrow="COMPUTE" title="实时计算量">
+            <Metric label="每个采样点" value="1 乘 + 2 加减" detail="y += α(x − y)" />
+            <Metric label="算术运算速率" value={formatEngineeringRate(sampleRateHz * 3, 'ops/s')} detail="按 3 次基本运算估算" />
+            <Metric label="乘法速率" value={formatEngineeringRate(sampleRateHz, 'mul/s')} detail="每采样 1 次乘法" />
+            <Metric label="状态量" value="y + α" detail="float 实现通常 8 bytes" />
+          </MetricGroup>
+        </div>
+
+        <p className="alpha-explanation">
+          <strong>α 到底表示什么：</strong>
+          当前 α = {formatNumber(alpha, 8)}。递推式先计算差值 <code>x − y</code>，再只修正其中的 α 倍；例如差值为 1，本次输出增加 <strong>{formatNumber(alpha, 8)}</strong>，差值为 10 时增加 <strong>{formatNumber(alpha * 10, 8)}</strong>。下一次采样会基于新的差值继续逼近。
+        </p>
+      </section>
 
       <div className="preset-row">
-        <span className="preset-label">快速场景</span>
-        {PRESETS.map((preset) => {
-          const Icon = preset.icon
-          return (
-            <button key={preset.id} type="button" className="preset-button" onClick={() => onPreset(preset)}>
-              <Icon size={17} />
-              <span><strong>{preset.name}</strong><small>{preset.description}</small></span>
-            </button>
-          )
-        })}
+        <span className="preset-label">参数示例</span>
+        {PRESETS.map((preset) => (
+          <button key={preset.id} type="button" className="preset-button is-text-only" onClick={() => onPreset(preset)}>
+            <span>
+              <strong>{preset.name}</strong>
+              <small>{preset.description} · fc {formatFrequency(preset.cutoffHz)} · fs {formatFrequency(preset.sampleRateHz)}</small>
+            </span>
+          </button>
+        ))}
       </div>
     </section>
   )

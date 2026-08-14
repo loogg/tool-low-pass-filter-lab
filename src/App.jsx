@@ -14,8 +14,14 @@ import DesignAssistant from './components/DesignAssistant.jsx'
 import ParameterDeck from './components/ParameterDeck.jsx'
 import ResponseLab from './components/ResponseLab.jsx'
 import SimulatorLab from './components/SimulatorLab.jsx'
-import { alphaForMethod, clamp, tauFromCutoff } from './lib/filterMath.js'
-import { formatNumber, formatSeconds } from './lib/format.js'
+import {
+  alphaForMethod,
+  CUTOFF_FREQUENCY_RANGE,
+  clamp,
+  SAMPLE_RATE_RANGE,
+  tauFromCutoff,
+} from './lib/filterMath.js'
+import { formatFrequency, formatNumber, formatSeconds } from './lib/format.js'
 
 const APP_VERSION = import.meta.env.APP_VERSION ?? '0.1.0'
 
@@ -27,16 +33,22 @@ export default function App() {
   const handleCutoffChange = useCallback(
     (nextCutoff) => {
       if (!Number.isFinite(nextCutoff)) return
-      setCutoffHz(clamp(nextCutoff, 0.1, sampleRateHz * 0.45))
+      setCutoffHz(clamp(
+        nextCutoff,
+        CUTOFF_FREQUENCY_RANGE.minimum,
+        CUTOFF_FREQUENCY_RANGE.maximum,
+      ))
     },
-    [sampleRateHz],
+    [],
   )
 
   const handleSampleRateChange = useCallback((nextSampleRate) => {
     if (!Number.isFinite(nextSampleRate)) return
-    const safeRate = clamp(Math.round(nextSampleRate), 10, 10000)
-    setSampleRateHz(safeRate)
-    setCutoffHz((current) => Math.min(current, safeRate * 0.45))
+    setSampleRateHz(clamp(
+      nextSampleRate,
+      SAMPLE_RATE_RANGE.minimum,
+      SAMPLE_RATE_RANGE.maximum,
+    ))
   }, [])
 
   const handlePreset = useCallback((preset) => {
@@ -101,7 +113,7 @@ export default function App() {
               </svg>
               <div className="instrument-readouts">
                 <div><span>τ</span><strong>{formatSeconds(tau)}</strong><small>time constant</small></div>
-                <div><span>fc</span><strong>{formatNumber(cutoffHz, 3)} Hz</strong><small>cutoff</small></div>
+                <div><span>fc</span><strong>{formatFrequency(cutoffHz)}</strong><small>cutoff</small></div>
                 <div><span>α</span><strong>{formatNumber(alpha, 5)}</strong><small>sample step</small></div>
               </div>
             </div>
