@@ -47,3 +47,16 @@ export function formatSeconds(value) {
 export function formatPercent(value, digits = 1) {
   return `${formatNumber(value * 100, digits)}%`
 }
+
+export function formatCFloatLiteral(value, significantDigits = 9) {
+  if (!Number.isFinite(value) || value === 0) return '0.0f'
+
+  const absolute = Math.abs(value)
+  if (absolute < 0.0001 || absolute >= 1_000_000) {
+    return `${value.toExponential(significantDigits - 1).replace('e+', 'e')}f`
+  }
+
+  let literal = Number(value.toPrecision(significantDigits)).toString()
+  if (!literal.includes('.') && !literal.includes('e')) literal += '.0'
+  return `${literal}f`
+}

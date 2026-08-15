@@ -67,10 +67,10 @@ export default function ResponseLab({ cutoffHz }) {
   return (
     <section className="content-section">
       <SectionIntro
-        eyebrow="02 · 看见响应"
-        title="一边看它追阶跃，一边看它削频率"
-        description="时域和频域不是两套滤波器，而是同一套系统的两个观察窗口。调整左侧的 fc，右侧三张图会一起变化。"
-        aside={<><CircleHelp size={18} />先找橙色参考线</>}
+        eyebrow="02 · 连续原型响应"
+        title="用 H(s) 同时观察阶跃、幅频与相频"
+        description="本页三张图严格对应连续一阶原型 H(s)=1/(1+τs)，只由 fc 决定；fs、α 与离散方法不会混入这些曲线。"
+        aside={<><CircleHelp size={18} />模拟原型 · 先找橙色参考线</>}
       />
 
       <div className="response-summary-grid">

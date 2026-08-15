@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  formatCFloatLiteral,
   formatEngineeringRate,
   formatFrequency,
   formatInteger,
@@ -20,5 +21,11 @@ describe('engineering display formatting', () => {
   it('keeps large counts compact but exact where each form is useful', () => {
     expect(formatInteger(8_001)).toBe('8,001')
     expect(formatEngineeringRate(300_000_000, 'ops/s')).toBe('300 Mops/s')
+  })
+
+  it('preserves very small MCU coefficients as valid non-zero C float literals', () => {
+    expect(formatCFloatLiteral(3.141592653540445e-11)).toBe('3.14159265e-11f')
+    expect(formatCFloatLiteral(0.14536400084676657)).toBe('0.145364001f')
+    expect(formatCFloatLiteral(1)).toBe('1.0f')
   })
 })

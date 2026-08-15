@@ -53,9 +53,9 @@ export default function SamplingAliasDiagram({
   }
 
   return (
-    <div className={`sampling-explainer ${signalInfo.aliased ? 'is-aliasing' : 'is-safe'}`}>
+    <div className={`sampling-explainer ${signalInfo.ambiguous ? 'is-aliasing' : 'is-safe'}`}>
       <div className="sampling-conclusion" aria-live="polite">
-        <span>{signalInfo.aliased ? 'ALIAS DETECTED' : 'NO ALIAS'}</span>
+        <span>{signalInfo.atNyquist ? 'NYQUIST EDGE' : signalInfo.aliased ? 'ALIAS DETECTED' : 'NO ALIAS'}</span>
         <div className="sampling-conclusion-flow">
           <div><small>模拟输入 fin</small><strong>{formatFrequency(signalFrequencyHz)}</strong></div>
           <b aria-hidden="true">→</b>
@@ -63,9 +63,11 @@ export default function SamplingAliasDiagram({
           <b aria-hidden="true">→</b>
           <div className="is-result"><small>数字序列看起来像</small><strong>{formatFrequency(signalInfo.aliasFrequency)}</strong></div>
         </div>
-        <p>{signalInfo.aliased
-          ? `ADC 后的任何数字算法都只能看到 ${formatFrequency(signalInfo.aliasFrequency)}，无法知道它原本是 ${formatFrequency(signalFrequencyHz)}。`
-          : `输入低于 fN = ${formatFrequency(nyquist)}，采样前后对应同一个频率。`}</p>
+        <p>{signalInfo.atNyquist
+          ? `输入正好落在 fN = ${formatFrequency(nyquist)}；频率位于数字边界，但正弦的完整幅值和相位无法唯一表达。`
+          : signalInfo.aliased
+            ? `ADC 后的任何数字算法都只能看到 ${formatFrequency(signalInfo.aliasFrequency)}，无法知道它原本是 ${formatFrequency(signalFrequencyHz)}。`
+            : `输入严格低于 fN = ${formatFrequency(nyquist)}，采样前后对应同一个频率。`}</p>
       </div>
 
       <ol className="sampling-process-steps">
@@ -96,7 +98,7 @@ export default function SamplingAliasDiagram({
         </div>
 
         <div className="alias-process-row is-output">
-          <header><span>ADC 能表达的频率 f_alias</span><strong>唯一频带：0 ～ fN</strong></header>
+          <header><span>ADC 能表达的频率 f_alias</span><strong>完整幅相频带：0 ≤ f &lt; fN</strong></header>
           <div className="alias-process-track is-nyquist-band">
             <FrequencyMarker
               position={aliasPercent}

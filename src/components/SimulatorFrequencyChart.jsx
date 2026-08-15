@@ -31,26 +31,32 @@ export default function SimulatorFrequencyChart({
   response,
   cutoffHz,
   measurementFrequencyHz,
+  measurementLabel,
   gainDb,
   phase,
 }) {
   const option = useMemo(() => {
     const gainData = toPairs(response.gain)
     const phaseData = toPairs(response.phase)
-    const references = [
-      {
+    const references = []
+    if (cutoffHz >= response.domain[0] && cutoffHz <= response.domain[1]) {
+      references.push({
         name: 'fc',
         xAxis: cutoffHz,
         lineStyle: { color: CUTOFF_COLOR, width: 1.4, type: 'dashed' },
         label: { color: CUTOFF_COLOR, formatter: 'fc', position: 'insideEndTop' },
-      },
-    ]
+      })
+    }
     if (measurementFrequencyHz > 0 && Math.abs(measurementFrequencyHz - cutoffHz) / cutoffHz > 0.015) {
       references.push({
-        name: 'f_alias',
+        name: 'measurement',
         xAxis: measurementFrequencyHz,
         lineStyle: { color: GAIN_COLOR, width: 1.3, type: 'dashed' },
-        label: { color: GAIN_COLOR, formatter: 'f_alias', position: 'insideEndBottom' },
+        label: {
+          color: GAIN_COLOR,
+          formatter: measurementLabel.replace('@ ', ''),
+          position: 'insideEndBottom',
+        },
       })
     }
 
@@ -233,7 +239,7 @@ export default function SimulatorFrequencyChart({
         },
       ],
     }
-  }, [cutoffHz, gainDb, measurementFrequencyHz, phase, response])
+  }, [cutoffHz, gainDb, measurementFrequencyHz, measurementLabel, phase, response])
 
   return (
     <div className="echart-analysis-frame frequency-analysis-chart">

@@ -40,17 +40,22 @@ export function aliasingInfo(frequencyHz, sampleRateHz) {
   const nyquistZone = Math.max(1, Math.ceil(inputFrequency / nyquist))
   const mirrored = nyquistZone % 2 === 0
   const tolerance = Math.max(EPSILON, sampleRate * 1e-12)
+  const aliasFrequency = Math.abs(alias) <= tolerance ? 0 : alias
+  const atNyquist = Math.abs(aliasFrequency - nyquist) <= tolerance
+  const aliased = inputFrequency > nyquist + tolerance
 
   return {
     inputFrequency,
     sampleRate,
     nyquistFrequency: nyquist,
     remainder,
-    aliasFrequency: Math.abs(alias) <= tolerance ? 0 : alias,
+    aliasFrequency,
     nearestSampleMultiple: Math.round(inputFrequency / sampleRate),
     nyquistZone,
     mirrored,
-    aliased: inputFrequency > nyquist + tolerance,
+    atNyquist,
+    aliased,
+    ambiguous: atNyquist || aliased,
   }
 }
 
@@ -100,8 +105,11 @@ export function discreteMagnitudeAt(frequencyHz, cutoffHz, sampleRateHz, method 
   const alpha = alphaForMethod(cutoffHz, sampleRate, method)
   const pole = 1 - alpha
   const omega = (TWO_PI * aliasFrequency(frequencyHz, sampleRate)) / sampleRate
-  const denominator = Math.sqrt(1 + pole * pole - 2 * pole * Math.cos(omega))
-  return denominator <= EPSILON ? 1 : alpha / denominator
+  const halfAngleSine = Math.sin(omega / 2)
+  const denominator = Math.sqrt(
+    alpha * alpha + 4 * pole * halfAngleSine * halfAngleSine,
+  )
+  return denominator <= Number.EPSILON ? 1 : alpha / denominator
 }
 
 export function discreteGainDbAt(frequencyHz, cutoffHz, sampleRateHz, method = 'zoh') {
@@ -116,11 +124,87 @@ export function discretePhaseDegreesAt(frequencyHz, cutoffHz, sampleRateHz, meth
   const alpha = alphaForMethod(cutoffHz, sampleRate, method)
   const pole = 1 - alpha
   const omega = (TWO_PI * aliasFrequency(frequencyHz, sampleRate)) / sampleRate
+  const halfAngleSine = Math.sin(omega / 2)
   const phase = -Math.atan2(
     pole * Math.sin(omega),
-    1 - pole * Math.cos(omega),
+    alpha + 2 * pole * halfAngleSine * halfAngleSine,
   )
-  return (phase * 180) / Math.PI
+  const phaseDegrees = (phase * 180) / Math.PI
+  return Math.abs(phaseDegrees) <= 1e-12 ? 0 : phaseDegrees
+}
+
+export function discreteGroupDelaySecondsAt(
+  frequencyHz,
+  cutoffHz,
+  sampleRateHz,
+  method = 'zoh',
+) {
+  const sampleRate = positive(sampleRateHz)
+  const alpha = alphaForMethod(cutoffHz, sampleRate, method)
+  const pole = 1 - alpha
+  const omega = (TWO_PI * aliasFrequency(frequencyHz, sampleRate)) / sampleRate
+  const halfAngleSine = Math.sin(omega / 2)
+  const oneMinusCosine = 2 * halfAngleSine * halfAngleSine
+  const denominator = alpha * alpha + 2 * pole * oneMinusCosine
+
+  if (denominator <= Number.EPSILON) return 0
+
+  const delaySamples = (pole * (alpha - oneMinusCosine)) / denominator
+  return delaySamples / sampleRate
+}
+
+export function discreteTimeConstantSeconds(cutoffHz, sampleRateHz, method = 'zoh') {
+  const sampleRate = positive(sampleRateHz)
+  const alpha = alphaForMethod(cutoffHz, sampleRate, method)
+
+  if (alpha >= 1) return 0
+  return -1 / (sampleRate * Math.log1p(-alpha))
+}
+
+export function discreteSettlingTime(
+  cutoffHz,
+  sampleRateHz,
+  method = 'zoh',
+  fraction = 0.95,
+) {
+  const safeFraction = clamp(fraction, EPSILON, 1 - EPSILON)
+  return -discreteTimeConstantSeconds(cutoffHz, sampleRateHz, method) * Math.log(1 - safeFraction)
+}
+
+export function digitalMappingDiagnostics(cutoffHz, sampleRateHz, method = 'zoh') {
+  const cutoff = positive(cutoffHz)
+  const sampleRate = positive(sampleRateHz)
+  const nyquist = sampleRate / 2
+  const tolerance = Math.max(EPSILON, sampleRate * 1e-12)
+  const cutoffInBaseband = cutoff < nyquist - tolerance
+
+  if (!cutoffInBaseband) {
+    return {
+      cutoffInBaseband,
+      closeToAnalog: false,
+      magnitude: null,
+      gainDb: null,
+      phaseDegrees: null,
+      gainErrorDb: null,
+      phaseErrorDegrees: null,
+    }
+  }
+
+  const magnitude = discreteMagnitudeAt(cutoff, cutoff, sampleRate, method)
+  const gainDb = 20 * Math.log10(Math.max(magnitude, EPSILON))
+  const phaseDegrees = discretePhaseDegreesAt(cutoff, cutoff, sampleRate, method)
+  const gainErrorDb = gainDb - (-10 * Math.log10(2))
+  const phaseErrorDegrees = phaseDegrees - (-45)
+
+  return {
+    cutoffInBaseband,
+    closeToAnalog: Math.abs(gainErrorDb) <= 0.5 && Math.abs(phaseErrorDegrees) <= 5,
+    magnitude,
+    gainDb,
+    phaseDegrees,
+    gainErrorDb,
+    phaseErrorDegrees,
+  }
 }
 
 export function phaseDelaySeconds(frequencyHz, cutoffHz) {
@@ -172,6 +256,71 @@ export function cutoffForStopband(frequencyHz, maximumMagnitude) {
   return positive(frequencyHz) / Math.sqrt(1 / (gain * gain) - 1)
 }
 
+function findLogCutoffThreshold(predicate) {
+  const minimum = CUTOFF_FREQUENCY_RANGE.minimum
+  const maximum = CUTOFF_FREQUENCY_RANGE.maximum
+
+  if (predicate(minimum)) return minimum
+  if (!predicate(maximum)) return Number.POSITIVE_INFINITY
+
+  let lowerLog = Math.log(minimum)
+  let upperLog = Math.log(maximum)
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const middleLog = (lowerLog + upperLog) / 2
+    if (predicate(Math.exp(middleLog))) upperLog = middleLog
+    else lowerLog = middleLog
+  }
+  return Math.exp(upperLog)
+}
+
+function cutoffForDiscretePassband(frequencyHz, minimumMagnitude, sampleRateHz, method) {
+  const gain = clamp(minimumMagnitude, EPSILON, 1 - EPSILON)
+  return findLogCutoffThreshold(
+    (cutoffHz) => discreteMagnitudeAt(frequencyHz, cutoffHz, sampleRateHz, method) >= gain,
+  )
+}
+
+function cutoffForDiscreteStopband(frequencyHz, maximumMagnitude, sampleRateHz, method) {
+  const gain = clamp(maximumMagnitude, EPSILON, 1 - EPSILON)
+  const minimum = CUTOFF_FREQUENCY_RANGE.minimum
+  const maximum = CUTOFF_FREQUENCY_RANGE.maximum
+  const gainAtMinimum = discreteMagnitudeAt(frequencyHz, minimum, sampleRateHz, method)
+  const gainAtMaximum = discreteMagnitudeAt(frequencyHz, maximum, sampleRateHz, method)
+
+  if (gainAtMinimum > gain) return 0
+  if (gainAtMaximum <= gain) return maximum
+
+  let lowerLog = Math.log(minimum)
+  let upperLog = Math.log(maximum)
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const middleLog = (lowerLog + upperLog) / 2
+    const middleCutoff = Math.exp(middleLog)
+    if (discreteMagnitudeAt(frequencyHz, middleCutoff, sampleRateHz, method) <= gain) {
+      lowerLog = middleLog
+    } else {
+      upperLog = middleLog
+    }
+  }
+  return Math.exp(lowerLog)
+}
+
+function cutoffForDiscreteSettlingTime(
+  timeSeconds,
+  fraction,
+  sampleRateHz,
+  method,
+) {
+  const maximumTime = positive(timeSeconds)
+  return findLogCutoffThreshold(
+    (cutoffHz) => discreteSettlingTime(
+      cutoffHz,
+      sampleRateHz,
+      method,
+      fraction,
+    ) <= maximumTime,
+  )
+}
+
 export function solveDesignConstraints({
   settlingSeconds,
   settlingFraction = 0.95,
@@ -180,25 +329,82 @@ export function solveDesignConstraints({
   stopFrequencyHz,
   stopMagnitude,
   sampleRateHz,
+  method = 'zoh',
 }) {
-  const timeLower = cutoffForSettlingTime(settlingSeconds, settlingFraction)
-  const passLower = cutoffForPassband(passFrequencyHz, passMagnitude)
-  const stopUpper = cutoffForStopband(stopFrequencyHz, stopMagnitude)
-  const samplingUpper = positive(sampleRateHz) * 0.45
+  const sampleRate = positive(sampleRateHz)
+  const nyquist = sampleRate / 2
+  const tolerance = Math.max(EPSILON, sampleRate * 1e-12)
+  const passFrequencyValid = Number.isFinite(passFrequencyHz)
+    && passFrequencyHz > 0
+    && passFrequencyHz < nyquist - tolerance
+  const stopFrequencyValid = Number.isFinite(stopFrequencyHz)
+    && stopFrequencyHz > 0
+    && stopFrequencyHz < nyquist - tolerance
+  const frequencyOrderValid = passFrequencyValid
+    && stopFrequencyValid
+    && passFrequencyHz < stopFrequencyHz
+  const settlingTimeValid = Number.isFinite(settlingSeconds)
+    && settlingSeconds >= 1 / sampleRate - tolerance / sampleRate
+  const issues = []
+
+  if (!settlingTimeValid) issues.push('settling-faster-than-sample')
+  if (!passFrequencyValid) issues.push('passband-outside-baseband')
+  if (!stopFrequencyValid) issues.push('stopband-outside-baseband')
+  if (passFrequencyValid && stopFrequencyValid && !frequencyOrderValid) {
+    issues.push('passband-not-below-stopband')
+  }
+
+  const timeLower = cutoffForDiscreteSettlingTime(
+    settlingSeconds,
+    settlingFraction,
+    sampleRate,
+    method,
+  )
+  const passLower = passFrequencyValid
+    ? cutoffForDiscretePassband(passFrequencyHz, passMagnitude, sampleRate, method)
+    : Number.POSITIVE_INFINITY
+  const stopUpper = stopFrequencyValid
+    ? cutoffForDiscreteStopband(stopFrequencyHz, stopMagnitude, sampleRate, method)
+    : 0
   const lower = Math.max(timeLower, passLower)
-  const upper = Math.min(stopUpper, samplingUpper)
-  const feasible = lower <= upper
+  const upper = Math.min(stopUpper, CUTOFF_FREQUENCY_RANGE.maximum)
+  const feasible = issues.length === 0
+    && Number.isFinite(lower)
+    && lower <= upper
   const suggested = feasible ? Math.sqrt(lower * upper) : null
+  const verification = suggested === null ? null : {
+    settlingSeconds: discreteSettlingTime(
+      suggested,
+      sampleRate,
+      method,
+      settlingFraction,
+    ),
+    passMagnitude: discreteMagnitudeAt(
+      passFrequencyHz,
+      suggested,
+      sampleRate,
+      method,
+    ),
+    stopMagnitude: discreteMagnitudeAt(
+      stopFrequencyHz,
+      suggested,
+      sampleRate,
+      method,
+    ),
+  }
 
   return {
     timeLower,
     passLower,
     stopUpper,
-    samplingUpper,
+    nyquistFrequency: nyquist,
+    method,
+    issues,
     lower,
     upper,
     feasible,
     suggested,
+    verification,
   }
 }
 

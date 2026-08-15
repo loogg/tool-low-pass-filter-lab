@@ -7,8 +7,12 @@ import {
   createAliasingFoldResponse,
   createSimulation,
   cutoffFromTau,
+  digitalMappingDiagnostics,
   discreteMagnitudeAt,
+  discreteGroupDelaySecondsAt,
   discretePhaseDegreesAt,
+  discreteSettlingTime,
+  discreteTimeConstantSeconds,
   gainDbAt,
   magnitudeAt,
   phaseDegreesAt,
@@ -72,6 +76,13 @@ describe('first-order low-pass relationships', () => {
       aliasFrequency: 400,
       nearestSampleMultiple: 2,
     })
+
+    expect(aliasingInfo(500, 1000)).toMatchObject({
+      aliasFrequency: 500,
+      atNyquist: true,
+      aliased: false,
+      ambiguous: true,
+    })
   })
 
   it('shows the same digital response for frequencies that sample to one alias', () => {
@@ -82,6 +93,36 @@ describe('first-order low-pass relationships', () => {
     expect(discretePhaseDegreesAt(600, 40, 1000)).toBeCloseTo(
       discretePhaseDegreesAt(400, 40, 1000),
       12,
+    )
+  })
+
+  it('calculates digital group delay and method-specific settling envelopes', () => {
+    expect(discreteGroupDelaySecondsAt(2.5, 2.5, 100, 'zoh')).toBeCloseTo(0.026962, 6)
+    expect(discreteTimeConstantSeconds(2.5, 100, 'zoh')).toBeCloseTo(tauFromCutoff(2.5), 12)
+    expect(discreteTimeConstantSeconds(2.5, 100, 'backward-euler')).toBeCloseTo(0.0685404, 6)
+    expect(discreteSettlingTime(2.5, 100, 'backward-euler', 0.95)).toBeCloseTo(0.205329, 6)
+  })
+
+  it('reports actual digital mapping error instead of using a fixed fc/fs threshold', () => {
+    expect(digitalMappingDiagnostics(2.5, 100, 'zoh')).toMatchObject({
+      cutoffInBaseband: true,
+      closeToAnalog: true,
+    })
+    expect(digitalMappingDiagnostics(10, 100, 'zoh')).toMatchObject({
+      cutoffInBaseband: true,
+      closeToAnalog: false,
+    })
+    expect(digitalMappingDiagnostics(50, 100, 'zoh')).toMatchObject({
+      cutoffInBaseband: false,
+      closeToAnalog: false,
+    })
+    expect(digitalMappingDiagnostics(0.001, 200_000_000, 'zoh')).toMatchObject({
+      cutoffInBaseband: true,
+      closeToAnalog: true,
+    })
+    expect(discreteMagnitudeAt(0.001, 0.001, 200_000_000, 'zoh')).toBeCloseTo(
+      1 / Math.sqrt(2),
+      9,
     )
   })
 
@@ -105,11 +146,13 @@ describe('design constraint solver', () => {
     })
 
     expect(result.timeLower).toBeCloseTo(0.4768, 3)
-    expect(result.passLower).toBeCloseTo(2.0647, 3)
-    expect(result.stopUpper).toBeCloseTo(3.1449, 3)
+    expect(result.passLower).toBeCloseTo(2.063, 3)
+    expect(result.stopUpper).toBeCloseTo(3.0885, 3)
     expect(result.feasible).toBe(true)
     expect(result.suggested).toBeGreaterThan(result.lower)
     expect(result.suggested).toBeLessThan(result.upper)
+    expect(result.verification.passMagnitude).toBeGreaterThan(0.9)
+    expect(result.verification.stopMagnitude).toBeLessThan(0.3)
   })
 
   it('detects incompatible requirements', () => {
@@ -123,6 +166,51 @@ describe('design constraint solver', () => {
     })
 
     expect(result.feasible).toBe(false)
+  })
+
+  it('solves high normalized-frequency constraints against the digital transfer function', () => {
+    const result = solveDesignConstraints({
+      settlingSeconds: 10,
+      passFrequencyHz: 40,
+      passMagnitude: 0.7,
+      stopFrequencyHz: 49,
+      stopMagnitude: 0.7,
+      sampleRateHz: 100,
+      method: 'zoh',
+    })
+
+    expect(result.feasible).toBe(true)
+    expect(result.suggested).toBeCloseTo(27.0442, 3)
+    expect(result.verification.passMagnitude).toBeGreaterThanOrEqual(0.7)
+    expect(result.verification.stopMagnitude).toBeLessThanOrEqual(0.7)
+  })
+
+  it('rejects passband or stopband targets on the Nyquist boundary', () => {
+    const result = solveDesignConstraints({
+      settlingSeconds: 1,
+      passFrequencyHz: 10,
+      passMagnitude: 0.9,
+      stopFrequencyHz: 50,
+      stopMagnitude: 0.3,
+      sampleRateHz: 100,
+    })
+
+    expect(result.feasible).toBe(false)
+    expect(result.issues).toContain('stopband-outside-baseband')
+  })
+
+  it('rejects a settling target shorter than one sample period', () => {
+    const result = solveDesignConstraints({
+      settlingSeconds: 0.001,
+      passFrequencyHz: 10,
+      passMagnitude: 0.9,
+      stopFrequencyHz: 20,
+      stopMagnitude: 0.3,
+      sampleRateHz: 100,
+    })
+
+    expect(result.feasible).toBe(false)
+    expect(result.issues).toContain('settling-faster-than-sample')
   })
 })
 

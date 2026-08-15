@@ -2,6 +2,7 @@ import EngineeringFrequencyInput from './EngineeringFrequencyInput.jsx'
 import {
   alphaForMethod,
   CUTOFF_FREQUENCY_RANGE,
+  digitalMappingDiagnostics,
   groupDelaySecondsAt,
   magnitudeAt,
   nyquistFrequency,
@@ -85,7 +86,7 @@ export default function ParameterDeck({
   const time95 = settlingTime(tau, 0.95)
   const time99 = settlingTime(tau, 0.99)
   const frequencyRatio = cutoffHz / sampleRateHz
-  const samplingSafe = frequencyRatio <= 0.45
+  const mapping = digitalMappingDiagnostics(cutoffHz, sampleRateHz, method)
   const cutoffMagnitude = magnitudeAt(cutoffHz, cutoffHz)
   const cutoffPhase = phaseDegreesAt(cutoffHz, cutoffHz)
   const cutoffGroupDelay = groupDelaySecondsAt(cutoffHz, cutoffHz)
@@ -96,7 +97,7 @@ export default function ParameterDeck({
         <div>
           <p className="eyebrow">全局实验参数</p>
           <h2 id="parameter-deck-title">设置滤波器，再查看完整计算结果</h2>
-          <p className="deck-description">fc 与 fs 独立输入；数值输入支持 Hz、kHz、MHz。超出采样安全范围时只提示风险，不会自动改写你的参数。</p>
+          <p className="deck-description">fc 与 fs 独立输入；数值输入支持 Hz、kHz、MHz。fc 到达或越过 Nyquist 边界时只提示风险，不会自动改写你的参数。</p>
         </div>
       </div>
 
@@ -198,8 +199,8 @@ export default function ParameterDeck({
       <section className="calculation-board" aria-live="polite" aria-label="当前参数计算结果">
         <header className="calculation-board-heading">
           <div><span>CALCULATED VALUES</span><h3>由当前 fc、fs 与离散方法直接得到</h3></div>
-          <strong className={samplingSafe ? 'is-safe' : 'is-warning'}>
-            {samplingSafe ? '采样配置合理' : '警告：fc > 0.45fs'}
+          <strong className={mapping.closeToAnalog ? 'is-safe' : 'is-warning'}>
+            {mapping.closeToAnalog ? 'fc 点映射接近连续原型' : '请检查数字映射差异'}
           </strong>
         </header>
 
@@ -207,9 +208,15 @@ export default function ParameterDeck({
           <MetricGroup eyebrow="DIGITAL" title="数字实现">
             <Metric label="采样周期 Ts" value={formatSeconds(samplePeriod)} detail="Ts = 1 / fs" />
             <Metric label="数字系数 α" value={formatNumber(alpha, 8)} detail={method === 'zoh' ? 'ZOH 映射' : '后向欧拉'} />
-            <Metric label="频率比 fc/fs" value={formatNumber(frequencyRatio, 6)} detail="建议不高于 0.45" />
+            <Metric
+              label="频率比 fc/fs"
+              value={formatNumber(frequencyRatio, 6)}
+              detail={mapping.cutoffInBaseband
+                ? `数字 @fc：${formatNumber(mapping.gainDb, 3)} dB / ${formatNumber(mapping.phaseDegrees, 2)}°`
+                : 'fc 已不在严格数字基带内'}
+            />
             <Metric label="奈奎斯特频率 fN" value={formatFrequency(nyquist)} detail="fN = fs / 2" />
-            <Metric label="无歧义频带" value={`0 ～ ${formatFrequency(nyquist)}`} detail="超过 fN 会折回，不是消失" />
+            <Metric label="无歧义频带" value={`0 ≤ f < ${formatFrequency(nyquist)}`} detail="fN 是特殊边界；超过后会折回" />
           </MetricGroup>
 
           <MetricGroup eyebrow="TIME DOMAIN" title="时域响应">
@@ -238,7 +245,7 @@ export default function ParameterDeck({
           <div className="sampling-theory-copy">
             <span>SAMPLING BOUNDARY</span>
             <h4>奈奎斯特频率是“开始产生歧义”的边界</h4>
-            <p>当前 <strong>fN = fs / 2 = {formatFrequency(nyquist)}</strong>。高于它的模拟频率不会被 ADC 自动丢掉，而会与更低频率产生完全相同的离散样本。</p>
+            <p>当前 <strong>fN = fs / 2 = {formatFrequency(nyquist)}</strong>。只有严格低于 fN 的频率才具有完整的幅相表达；fN 本身是特殊边界，高于它的模拟频率会折回。</p>
           </div>
 
           <div className="sampling-fold-ruler" role="img" aria-label="频率轴在每个奈奎斯特区交替正向与镜像折回">

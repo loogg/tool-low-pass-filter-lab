@@ -1,7 +1,12 @@
 import { Check, Clipboard, Code2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { alphaBackwardEuler, alphaForMethod, alphaZoh, nyquistFrequency, tauFromCutoff } from '../lib/filterMath.js'
-import { formatFrequency, formatNumber, formatSeconds } from '../lib/format.js'
+import {
+  formatCFloatLiteral,
+  formatFrequency,
+  formatNumber,
+  formatSeconds,
+} from '../lib/format.js'
 import SectionIntro from './SectionIntro.jsx'
 
 export default function CodePanel({ cutoffHz, sampleRateHz, method }) {
@@ -26,7 +31,7 @@ static inline void lpf1_init(lpf1_t *f)
     /* fc = ${cutoffHz.toFixed(4)} Hz, fs = ${sampleRateHz.toFixed(2)} Hz */
     /* Nyquist fN = ${nyquist.toFixed(4)} Hz. Band-limit the analog input before ADC. */
     /* ${methodLabel} */
-    f->alpha = ${alpha.toFixed(8)}f;
+    f->alpha = ${formatCFloatLiteral(alpha)};
     f->y = 0.0f;
     f->initialized = false;
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Activity, useCallback, useEffect, useState } from 'react'
 import {
   ArrowDown,
   BookOpenCheck,
@@ -34,16 +34,19 @@ function initialWorkspace() {
 }
 
 function WorkspacePanel({ id, activeWorkspace, children, className = '' }) {
+  const active = activeWorkspace === id
   return (
-    <div
-      id={`workspace-panel-${id}`}
-      className={`workspace-page is-${id} ${className}`}
-      role="tabpanel"
-      aria-labelledby={`workspace-tab-${id}`}
-      hidden={activeWorkspace !== id}
-    >
-      {children}
-    </div>
+    <Activity mode={active ? 'visible' : 'hidden'}>
+      <div
+        id={`workspace-panel-${id}`}
+        className={`workspace-page is-${id} ${className}`}
+        role="tabpanel"
+        aria-labelledby={`workspace-tab-${id}`}
+        hidden={!active}
+      >
+        {children}
+      </div>
+    </Activity>
   )
 }
 
@@ -213,8 +216,9 @@ export default function App() {
           <WorkspacePanel id="response" activeWorkspace={activeWorkspace} className="workspace-split">
             <GlobalParameterRail
               {...sharedParameterProps}
+              variant="analog"
               title="响应曲线参数"
-              description="左侧设置 fc、fs 与离散方法；右侧专注观察时域、幅频和相频。"
+              description="本页只分析连续一阶原型，因此仅由 fc 决定；数字离散结果请到模拟工作区查看。"
             />
             <div className="workspace-result-pane"><ResponseLab cutoffHz={cutoffHz} /></div>
           </WorkspacePanel>
@@ -224,7 +228,11 @@ export default function App() {
           </WorkspacePanel>
 
           <WorkspacePanel id="designer" activeWorkspace={activeWorkspace}>
-            <DesignAssistant sampleRateHz={sampleRateHz} onApplyCutoff={handleCutoffChange} />
+            <DesignAssistant
+              sampleRateHz={sampleRateHz}
+              method={method}
+              onApplyCutoff={handleCutoffChange}
+            />
           </WorkspacePanel>
 
           <WorkspacePanel id="code" activeWorkspace={activeWorkspace} className="workspace-split is-code-layout">
