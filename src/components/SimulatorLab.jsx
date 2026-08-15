@@ -1,7 +1,6 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { Pause, Play, RotateCcw } from 'lucide-react'
 import EngineeringFrequencyInput from './EngineeringFrequencyInput.jsx'
-import SectionIntro from './SectionIntro.jsx'
 import {
   aliasingInfo,
   clamp,
@@ -715,12 +714,6 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
 
   return (
     <section className="content-section simulator-section">
-      <SectionIntro
-        eyebrow="03 · 专业仿真工作台"
-        title="参数在左，分析集中在右"
-        description="左栏连续配置完整信号链；右栏用两张专业交互图完成时域、混叠、幅值和相位分析，再集中输出全部计算结果。"
-      />
-
       <div className="simulator-workbench is-unified">
         <aside className="simulator-parameter-pane simulator-all-parameters" aria-label="全部仿真参数">
           <header className="simulator-editor-heading">

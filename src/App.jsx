@@ -134,7 +134,7 @@ export default function App() {
         onSelect={selectWorkspace}
       />
 
-      <div className="workspace-stage">
+      <div className="workspace-stage" data-workspace={activeWorkspace}>
         <header className="workspace-toolbar">
           <div>
             <span>{activeWorkspaceMeta.index} / {activeWorkspaceMeta.eyebrow}</span>

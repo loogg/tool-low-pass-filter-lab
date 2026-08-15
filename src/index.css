@@ -6834,7 +6834,7 @@ footer > a {
   min-height: 320px;
 }
 
-.echart-loading-state {
+  .echart-loading-state {
   display: flex;
   min-height: 360px;
   align-items: center;
@@ -6989,7 +6989,48 @@ footer > a {
     border-radius: 10px;
   }
 
-  .echart-loading-state {
+.echart-loading-state {
     min-height: 340px;
+  }
+}
+
+/* Simulator compact viewport: the workspace navigation already names this tool. */
+
+.workspace-stage[data-workspace='simulator'] .workspace-toolbar {
+  display: none;
+}
+
+.workspace-stage[data-workspace='simulator'] .workspace-main {
+  padding: clamp(8px, 1vw, 14px);
+}
+
+.workspace-stage[data-workspace='simulator'] .workspace-page.is-simulator > .simulator-section {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.workspace-stage[data-workspace='simulator'] .simulator-workbench.is-unified {
+  height: clamp(680px, calc(100vh - clamp(16px, 2vw, 28px)), 1080px);
+}
+
+.workspace-stage[data-workspace='simulator'] .simulator-all-parameters .simulator-editor-heading,
+.workspace-stage[data-workspace='simulator'] .simulator-all-visuals > .simulator-visual-heading {
+  min-height: 92px;
+  padding: 15px 18px 13px;
+}
+
+@media (max-width: 820px) {
+  .workspace-stage[data-workspace='simulator'] .workspace-main {
+    padding: 10px 8px 22px;
+  }
+
+  .workspace-stage[data-workspace='simulator'] .workspace-page.is-simulator > .simulator-section {
+    padding: 0;
+  }
+
+  .workspace-stage[data-workspace='simulator'] .simulator-workbench.is-unified {
+    height: auto;
   }
 }

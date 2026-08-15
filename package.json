@@ -1,7 +1,7 @@
 {
   "name": "tool-low-pass-filter-lab",
   "private": true,
-  "version": "0.1.8",
+  "version": "0.1.9",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/loogg/tool-low-pass-filter-lab.git"
