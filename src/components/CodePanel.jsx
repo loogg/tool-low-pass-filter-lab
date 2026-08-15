@@ -52,7 +52,7 @@ static inline float lpf1_update(lpf1_t *f, float x)
   }
 
   return (
-    <section id="code" className="content-section">
+    <section className="content-section">
       <SectionIntro
         eyebrow="05 · 落到代码"
         title="最后 MCU 真正执行的，仍然只有一行"

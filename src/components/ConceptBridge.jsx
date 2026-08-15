@@ -8,7 +8,7 @@ export default function ConceptBridge({ cutoffHz, sampleRateHz, method }) {
   const alpha = alphaForMethod(cutoffHz, sampleRateHz, method)
 
   return (
-    <section id="concept" className="content-section">
+    <section className="content-section">
       <SectionIntro
         eyebrow="01 · 建立直觉"
         title="三个符号，其实只在讲同一个一阶极点"

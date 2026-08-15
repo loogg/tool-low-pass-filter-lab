@@ -65,11 +65,11 @@ export default function ResponseLab({ cutoffHz }) {
   ]
 
   return (
-    <section id="response" className="content-section">
+    <section className="content-section">
       <SectionIntro
         eyebrow="02 · 看见响应"
         title="一边看它追阶跃，一边看它削频率"
-        description="时域和频域不是两套滤波器，而是同一套系统的两个观察窗口。移动顶部的 fc，下面三张图会一起变化。"
+        description="时域和频域不是两套滤波器，而是同一套系统的两个观察窗口。调整左侧的 fc，右侧三张图会一起变化。"
         aside={<><CircleHelp size={18} />先找橙色参考线</>}
       />
 

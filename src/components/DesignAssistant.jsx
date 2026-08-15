@@ -42,7 +42,7 @@ export default function DesignAssistant({ sampleRateHz, onApplyCutoff }) {
   const position = (value) => `${((Math.log10(value) - logMinimum) / logSpan) * 100}%`
 
   return (
-    <section id="designer" className="content-section">
+    <section className="content-section">
       <SectionIntro
         eyebrow="04 · 工程选型"
         title="别凭感觉拧旋钮，让三类约束自己求交集"

@@ -52,7 +52,7 @@ const WORKSPACE_TABS = [
     eyebrow: 'FILTER',
     label: '滤波器',
     title: '设置独立的数字滤波器',
-    description: '本区 fc、fs 与离散方法完全独立于页面顶部，适合对比不同实现的时域、增益与相位。',
+    description: '本区 fc、fs 与离散方法完全独立于全局参数，适合对比不同实现的时域、增益与相位。',
   },
   {
     id: 'disturbance',
@@ -361,13 +361,13 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
     alias: aliasingInfo(simSampleRateHz * ratio, simSampleRateHz).aliasFrequency,
   }))
   const cutoffPresets = normalizeFrequencyPresets([
-    { id: 'global-fc', label: '顶部 fc', value: cutoffHz },
+    { id: 'global-fc', label: '全局 fc', value: cutoffHz },
     { id: 'fc-one', label: '1 Hz', value: 1 },
     { id: 'fc-kilo', label: '1 kHz', value: 1_000 },
     { id: 'fc-mega', label: '1 MHz', value: 1_000_000 },
   ], CUTOFF_FREQUENCY_RANGE.minimum, CUTOFF_FREQUENCY_RANGE.maximum)
   const sampleRatePresets = normalizeFrequencyPresets([
-    { id: 'global-fs', label: '顶部 fs', value: sampleRateHz },
+    { id: 'global-fs', label: '全局 fs', value: sampleRateHz },
     { id: 'fs-audio', label: '48 kHz', value: 48_000 },
     { id: 'fs-mega', label: '1 MHz', value: 1_000_000 },
     { id: 'fs-fast', label: '100 MHz', value: 100_000_000 },
@@ -612,15 +612,15 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
   }
 
   return (
-    <section id="simulator" className="content-section simulator-section">
+    <section className="content-section simulator-section">
       <SectionIntro
         eyebrow="03 · 专业仿真工作台"
         title="一次只调一组参数，右侧始终看到结果"
-        description="五个功能页把信号源、滤波器、干扰、采样与计算预算分开。参数仍全部开放，但不再同时铺满页面；切换左侧 Tab，右侧的波形、折回过程和计算结果会进入对应视角。"
+        description="五个二级功能页把信号源、滤波器、干扰、采样与计算预算分开。顶部切换参数组，左侧纵向配置，右侧始终保留波形、折回过程和计算结果。"
       />
 
       <div className="simulator-workbench">
-        <nav className="simulator-tab-rail" role="tablist" aria-label="仿真工作台功能" aria-orientation="vertical">
+        <nav className="simulator-tab-rail" role="tablist" aria-label="仿真工作台功能" aria-orientation="horizontal">
           <div className="simulator-rail-brand" aria-hidden="true">
             <span>LPF</span>
             <small>LAB</small>
@@ -665,7 +665,7 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
             </div>
             {activeTab === 'filter' ? (
               <button className="simulator-sync-button" type="button" onClick={loadGlobalParameters}>
-                载入顶部参数
+                载入全局参数
               </button>
             ) : null}
           </header>
@@ -763,7 +763,7 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
                   hint={'Ts = ' + formatSeconds(samplePeriodSeconds(simSampleRateHz)) + '；fN = ' + formatFrequency(nyquistFrequency(simSampleRateHz)) + '。'}
                 />
                 <div className="control-group simulator-method-group editor-control-card">
-                  <div className="control-group-heading"><span>离散方法</span><small>独立于顶部</small></div>
+                  <div className="control-group-heading"><span>离散方法</span><small>独立于全局</small></div>
                   <div className="segmented-control" role="group" aria-label="仿真离散方法">
                     <button type="button" className={simMethod === 'zoh' ? 'is-active' : ''} onClick={() => setSimMethod('zoh')}>ZOH 精确</button>
                     <button type="button" className={simMethod === 'backward-euler' ? 'is-active' : ''} onClick={() => setSimMethod('backward-euler')}>后向欧拉</button>
