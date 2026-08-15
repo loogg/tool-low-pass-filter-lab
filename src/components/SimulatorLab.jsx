@@ -304,6 +304,8 @@ function LiveAliasingStrip({
   onSelectPreset,
 }) {
   const nyquist = nyquistFrequency(sampleRateHz)
+  const nearestMultipleIndex = signalInfo.nearestSampleMultiple
+  const nearestMultipleHz = nearestMultipleIndex * sampleRateHz
 
   if (inputType === 'step') {
     return (
@@ -334,8 +336,16 @@ function LiveAliasingStrip({
         </div>
       </div>
       <div className="live-alias-equation">
-        <code>r = fin mod fs = {formatFrequency(signalInfo.remainder)}</code>
-        <code>f_alias = min(r, fs − r) = {formatFrequency(signalInfo.aliasFrequency)}</code>
+        <div className="live-alias-mental-math">
+          <span>心算（推荐）· 找离 fin 最近的 fs 整数倍</span>
+          <code>最近值：{nearestMultipleIndex} × {formatFrequency(sampleRateHz)} = {formatFrequency(nearestMultipleHz)}</code>
+          <strong>f_alias = |{formatFrequency(signalFrequencyHz)} − {formatFrequency(nearestMultipleHz)}| = {formatFrequency(signalInfo.aliasFrequency)}</strong>
+        </div>
+        <details className="live-alias-program-formula">
+          <summary>查看程序等价算法</summary>
+          <code>r = fin mod fs = {formatFrequency(signalInfo.remainder)}</code>
+          <code>f_alias = min(r, fs − r) = {formatFrequency(signalInfo.aliasFrequency)}</code>
+        </details>
       </div>
       <div className="live-alias-presets" role="group" aria-label="一键切换混叠分析例题">
         <span>ALIAS PRESETS</span>
@@ -436,6 +446,7 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
   const samplingSafe = simCutoffHz <= simSampleRateHz * 0.45
   const signalAliasing = aliasingInfo(activeSignalFrequency, simSampleRateHz)
   const interferenceAliasing = aliasingInfo(activeInterferenceFrequency, simSampleRateHz)
+  const signalNearestMultipleHz = signalAliasing.nearestSampleMultiple * simSampleRateHz
 
   const signalPresets = normalizeFrequencyPresets([
     { id: 'slow', label: '0.2×fc', value: simCutoffHz * 0.2 },
@@ -686,7 +697,7 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
         { label: '模拟输入 fin', value: formatFrequency(activeSignalFrequency), detail: `第 ${signalAliasing.nyquistZone} Nyquist 区` },
         { label: '无歧义上限 fN', value: formatFrequency(nyquistFrequency(simSampleRateHz)), detail: 'fs / 2' },
         { label: 'ADC 看到 f_alias', value: formatFrequency(signalAliasing.aliasFrequency), detail: signalAliasing.aliased ? '已折回' : '与 fin 相同' },
-        { label: '余数 r', value: formatFrequency(signalAliasing.remainder), detail: 'fin mod fs' },
+        { label: '最近的 fs 整数倍', value: formatFrequency(signalNearestMultipleHz), detail: `k = ${signalAliasing.nearestSampleMultiple}` },
         { label: '原频率采样密度', value: formatEngineeringRate(samplesPerCycle, 'samples/cycle'), detail: samplesPerCycle < 2 ? '低于 Nyquist 要求' : 'fs / fin' },
         { label: '数字低通增益', value: formatPercent(gain, 3), detail: `按 f_alias · ${formatNumber(gainDb, 3)} dB` },
       ]
@@ -859,9 +870,9 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
                   <small>fN = fs / 2；只有 0 ～ fN 是无歧义数字频带。</small>
                 </div>
                 <div className="sampling-formula-card">
-                  <span>混叠计算</span>
-                  <code>r = fin mod fs</code>
-                  <code>f_alias = min(r, fs − r)</code>
+                  <span>混叠心算（推荐）</span>
+                  <code>k = round(fin / fs) = {signalAliasing.nearestSampleMultiple}</code>
+                  <code>f_alias = |fin − k·fs|</code>
                   <p>{inputType === 'step' ? '阶跃没有单一载波频率；右侧按宽频谱说明。' : `${describeAliasing(signalAliasing)}；当前得到 ${formatFrequency(signalAliasing.aliasFrequency)}。`}</p>
                 </div>
             </ParameterSection>

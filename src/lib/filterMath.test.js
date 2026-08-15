@@ -56,15 +56,21 @@ describe('first-order low-pass relationships', () => {
 
     expect(aliasingInfo(600, 1000)).toMatchObject({
       aliasFrequency: 400,
+      nearestSampleMultiple: 1,
       nyquistZone: 2,
       mirrored: true,
       aliased: true,
     })
     expect(aliasingInfo(1100, 1000)).toMatchObject({
       aliasFrequency: 100,
+      nearestSampleMultiple: 1,
       nyquistZone: 3,
       mirrored: false,
       aliased: true,
+    })
+    expect(aliasingInfo(1600, 1000)).toMatchObject({
+      aliasFrequency: 400,
+      nearestSampleMultiple: 2,
     })
   })
 

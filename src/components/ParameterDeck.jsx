@@ -258,10 +258,10 @@ export default function ParameterDeck({
           </div>
 
           <div className="sampling-formula-card">
-            <span>通用计算</span>
-            <code>r = f<sub>in</sub> mod f<sub>s</sub></code>
-            <code>f<sub>alias</sub> = min(r, f<sub>s</sub> − r)</code>
-            <small>当前示例：0.6fs = {formatFrequency(sampleRateHz * 0.6)} → 0.4fs = <strong>{formatFrequency(sampleRateHz * 0.4)}</strong></small>
+            <span>心算公式（推荐）</span>
+            <code>k = round(f<sub>in</sub> / f<sub>s</sub>)</code>
+            <code>f<sub>alias</sub> = |f<sub>in</sub> − k·f<sub>s</sub>|</code>
+            <small>找到离 f<sub>in</sub> 最近的 f<sub>s</sub> 整数倍，再算两者距离。当前：{formatFrequency(sampleRateHz * 0.6)} 离 {formatFrequency(sampleRateHz)} 最近，距离为 <strong>{formatFrequency(sampleRateHz * 0.4)}</strong>。</small>
           </div>
         </section>
 

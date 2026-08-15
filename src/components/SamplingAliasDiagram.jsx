@@ -29,6 +29,8 @@ export default function SamplingAliasDiagram({
   const remainderPercent = (signalInfo.remainder / sampleRateHz) * 100
   const aliasPercent = nyquist > 0 ? (signalInfo.aliasFrequency / nyquist) * 100 : 0
   const reflected = signalInfo.remainder > nyquist
+  const nearestMultipleIndex = signalInfo.nearestSampleMultiple
+  const nearestMultipleHz = nearestMultipleIndex * sampleRateHz
 
   if (inputType === 'step') {
     return (
@@ -50,12 +52,6 @@ export default function SamplingAliasDiagram({
     )
   }
 
-  const operationLabel = reflected
-    ? `r > fN，镜像为 fs − r`
-    : signalInfo.aliased
-      ? '取模后已落回 0 ～ fN'
-      : 'fin 本来就在无歧义频带'
-
   return (
     <div className={`sampling-explainer ${signalInfo.aliased ? 'is-aliasing' : 'is-safe'}`}>
       <div className="sampling-conclusion" aria-live="polite">
@@ -73,14 +69,14 @@ export default function SamplingAliasDiagram({
       </div>
 
       <ol className="sampling-process-steps">
-        <li><span>01</span><div><strong>先画安全边界</strong><small>fN = fs / 2 = {formatFrequency(nyquist)}</small></div></li>
-        <li><span>02</span><div><strong>折进一个采样周期</strong><small>r = fin mod fs = {formatFrequency(signalInfo.remainder)}</small></div></li>
-        <li><span>03</span><div><strong>{operationLabel}</strong><small>f_alias = min(r, fs − r)</small></div></li>
+        <li><span>01</span><div><strong>寻找最近的 fs 整数倍</strong><small>k = round(fin / fs) = {nearestMultipleIndex}</small></div></li>
+        <li><span>02</span><div><strong>算出最近频率</strong><small>k·fs = {formatFrequency(nearestMultipleHz)}</small></div></li>
+        <li><span>03</span><div><strong>两者距离就是折回频率</strong><small>|fin − k·fs| = {formatFrequency(signalInfo.aliasFrequency)}</small></div></li>
       </ol>
 
       <div className="alias-process-board">
         <div className="alias-process-row">
-          <header><span>取余后的频率 r</span><strong>一个采样周期：0 ～ fs</strong></header>
+          <header><span>程序等价过程：取余后的频率 r</span><strong>一个采样周期：0 ～ fs</strong></header>
           <div className="alias-process-track is-sample-period">
             <span className="alias-track-half" aria-hidden="true" />
             <FrequencyMarker

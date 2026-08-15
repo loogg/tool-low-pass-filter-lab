@@ -203,7 +203,7 @@ export default function App() {
                 <h2>一阶低通很实用，但它不是万能橡皮擦</h2>
               </div>
               <div className="boundary-grid">
-                <article><span>01</span><h3>不能替代模拟抗混叠</h3><p>超过 fs/2 的模拟分量会按 f_alias = min(r, fs − r) 折回。数字低通只看到折回后的频率，无法恢复来源。</p></article>
+                <article><span>01</span><h3>不能替代模拟抗混叠</h3><p>超过 fs/2 的模拟分量会折回；心算时找最近的 fs 整数倍，再用 f_alias = |fin − k·fs| 求距离。数字低通无法恢复来源。</p></article>
                 <article><span>02</span><h3>滚降只有 −20 dB/dec</h3><p>有效频带和干扰靠得太近时，应考虑二阶、高阶 IIR 或 FIR。</p></article>
                 <article><span>03</span><h3>孤立尖峰仍会拉动输出</h3><p>离群值明显时，可先做限幅、中值滤波或异常值处理。</p></article>
               </div>
