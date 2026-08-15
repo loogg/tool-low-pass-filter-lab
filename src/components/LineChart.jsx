@@ -207,15 +207,32 @@ export default function LineChart({
           ))}
 
           {paths.map((item) => (
-            <path
+            <g
               key={item.label}
-              d={item.path}
-              className="chart-series-line"
+              className="chart-series"
               style={{
                 '--series-color': item.color,
-                strokeDasharray: item.dash ?? 'none',
+                '--series-opacity': item.opacity ?? 1,
+                '--series-width': item.width ?? 3.2,
               }}
-            />
+            >
+              {item.showLine === false ? null : (
+                <path
+                  d={item.path}
+                  className="chart-series-line"
+                  style={{ strokeDasharray: item.dash ?? 'none' }}
+                />
+              )}
+              {item.showPoints ? item.data.map((point, index) => (
+                <circle
+                  key={`${point.x}-${index}`}
+                  className="chart-series-point"
+                  cx={scaleX(point.x)}
+                  cy={scaleY(point.y)}
+                  r={item.pointRadius ?? 2.4}
+                />
+              )) : null}
+            </g>
           ))}
 
           {hoverPixel !== null ? (

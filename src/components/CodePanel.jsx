@@ -1,7 +1,7 @@
 import { Check, Clipboard, Code2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { alphaBackwardEuler, alphaForMethod, alphaZoh, tauFromCutoff } from '../lib/filterMath.js'
-import { formatNumber, formatSeconds } from '../lib/format.js'
+import { alphaBackwardEuler, alphaForMethod, alphaZoh, nyquistFrequency, tauFromCutoff } from '../lib/filterMath.js'
+import { formatFrequency, formatNumber, formatSeconds } from '../lib/format.js'
 import SectionIntro from './SectionIntro.jsx'
 
 export default function CodePanel({ cutoffHz, sampleRateHz, method }) {
@@ -10,6 +10,7 @@ export default function CodePanel({ cutoffHz, sampleRateHz, method }) {
   const alpha = alphaForMethod(cutoffHz, sampleRateHz, method)
   const zohAlpha = alphaZoh(cutoffHz, sampleRateHz)
   const backwardAlpha = alphaBackwardEuler(cutoffHz, sampleRateHz)
+  const nyquist = nyquistFrequency(sampleRateHz)
   const methodLabel = method === 'zoh' ? 'ZOH exact discretization' : 'Backward Euler discretization'
   const code = useMemo(
     () => `#include <stdbool.h>
@@ -23,6 +24,7 @@ typedef struct {
 static inline void lpf1_init(lpf1_t *f)
 {
     /* fc = ${cutoffHz.toFixed(4)} Hz, fs = ${sampleRateHz.toFixed(2)} Hz */
+    /* Nyquist fN = ${nyquist.toFixed(4)} Hz. Band-limit the analog input before ADC. */
     /* ${methodLabel} */
     f->alpha = ${alpha.toFixed(8)}f;
     f->y = 0.0f;
@@ -40,7 +42,7 @@ static inline float lpf1_update(lpf1_t *f, float x)
     f->y += f->alpha * (x - f->y);
     return f->y;
 }`,
-    [cutoffHz, sampleRateHz, methodLabel, alpha],
+    [cutoffHz, sampleRateHz, nyquist, methodLabel, alpha],
   )
 
   async function copyCode() {
@@ -81,6 +83,7 @@ static inline float lpf1_update(lpf1_t *f, float x)
             <p>当前 τ = {formatSeconds(tau)}。当 fs ≫ fc 时，两种结果会很接近。</p>
           </div>
           <div className="engineering-note"><strong>启动注意</strong><p>第一次采样让 y = x，可避免从 0 开始产生不必要的启动过渡。</p></div>
+          <div className="engineering-note is-warning"><strong>采样链路注意</strong><p>当前 fN = {formatFrequency(nyquist)}。这段代码运行在 ADC 之后，无法撤销已经折回的频率；模拟抗混叠滤波器必须放在 ADC 之前。</p></div>
         </aside>
       </div>
     </section>

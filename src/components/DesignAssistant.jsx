@@ -46,7 +46,7 @@ export default function DesignAssistant({ sampleRateHz, onApplyCutoff }) {
       <SectionIntro
         eyebrow="04 · 工程选型"
         title="别凭感觉拧旋钮，让三类约束自己求交集"
-        description="响应速度和有效信号会给出 fc 下限，干扰抑制会给出 fc 上限。上下限有交集，一阶滤波才真正可行。"
+        description="响应速度和有效信号会给出 fc 下限，干扰抑制会给出 fc 上限。这里的 0.45fs 只为数字离散留余量；它不能替代 ADC 前的模拟抗混叠限带。"
         aside={<><Gauge size={18} />当前 fs = {formatFrequency(sampleRateHz)}</>}
       />
 
@@ -121,7 +121,7 @@ export default function DesignAssistant({ sampleRateHz, onApplyCutoff }) {
           )}
         </article>
       </div>
-      <p className="formula-footnote">计算采用严格 95% 响应式，而不是把 3τ 当成完全精确值；当前下限取 max({formatNumber(result.timeLower, 3)}, {formatNumber(result.passLower, 3)}) Hz。</p>
+      <p className="formula-footnote">计算采用严格 95% 响应式，而不是把 3τ 当成完全精确值；当前下限取 max({formatNumber(result.timeLower, 3)}, {formatNumber(result.passLower, 3)}) Hz。还要单独确认模拟输入在 fs/2 以上的能量已于 ADC 前被充分抑制。</p>
     </section>
   )
 }

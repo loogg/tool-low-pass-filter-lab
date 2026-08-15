@@ -31,6 +31,33 @@ export function nyquistFrequency(sampleRateHz) {
   return positive(sampleRateHz) / 2
 }
 
+export function aliasingInfo(frequencyHz, sampleRateHz) {
+  const sampleRate = positive(sampleRateHz)
+  const inputFrequency = Math.abs(Number.isFinite(frequencyHz) ? frequencyHz : 0)
+  const nyquist = sampleRate / 2
+  const remainder = inputFrequency % sampleRate
+  const alias = remainder <= nyquist ? remainder : sampleRate - remainder
+  const nyquistZone = Math.max(1, Math.ceil(inputFrequency / nyquist))
+  const mirrored = nyquistZone % 2 === 0
+  const tolerance = Math.max(EPSILON, sampleRate * 1e-12)
+
+  return {
+    inputFrequency,
+    sampleRate,
+    nyquistFrequency: nyquist,
+    remainder,
+    aliasFrequency: Math.abs(alias) <= tolerance ? 0 : alias,
+    nearestSampleMultiple: Math.round(inputFrequency / sampleRate),
+    nyquistZone,
+    mirrored,
+    aliased: inputFrequency > nyquist + tolerance,
+  }
+}
+
+export function aliasFrequency(frequencyHz, sampleRateHz) {
+  return aliasingInfo(frequencyHz, sampleRateHz).aliasFrequency
+}
+
 export function cutoffFromTau(tauSeconds) {
   return 1 / (TWO_PI * positive(tauSeconds))
 }
@@ -38,7 +65,7 @@ export function cutoffFromTau(tauSeconds) {
 export function alphaZoh(cutoffHz, sampleRateHz) {
   const cutoff = positive(cutoffHz)
   const sampleRate = positive(sampleRateHz)
-  return clamp(1 - Math.exp((-TWO_PI * cutoff) / sampleRate), 0, 1)
+  return clamp(-Math.expm1((-TWO_PI * cutoff) / sampleRate), 0, 1)
 }
 
 export function alphaBackwardEuler(cutoffHz, sampleRateHz) {
@@ -68,6 +95,34 @@ export function phaseDegreesAt(frequencyHz, cutoffHz) {
   return (-Math.atan(ratio) * 180) / Math.PI
 }
 
+export function discreteMagnitudeAt(frequencyHz, cutoffHz, sampleRateHz, method = 'zoh') {
+  const sampleRate = positive(sampleRateHz)
+  const alpha = alphaForMethod(cutoffHz, sampleRate, method)
+  const pole = 1 - alpha
+  const omega = (TWO_PI * aliasFrequency(frequencyHz, sampleRate)) / sampleRate
+  const denominator = Math.sqrt(1 + pole * pole - 2 * pole * Math.cos(omega))
+  return denominator <= EPSILON ? 1 : alpha / denominator
+}
+
+export function discreteGainDbAt(frequencyHz, cutoffHz, sampleRateHz, method = 'zoh') {
+  return 20 * Math.log10(Math.max(
+    discreteMagnitudeAt(frequencyHz, cutoffHz, sampleRateHz, method),
+    EPSILON,
+  ))
+}
+
+export function discretePhaseDegreesAt(frequencyHz, cutoffHz, sampleRateHz, method = 'zoh') {
+  const sampleRate = positive(sampleRateHz)
+  const alpha = alphaForMethod(cutoffHz, sampleRate, method)
+  const pole = 1 - alpha
+  const omega = (TWO_PI * aliasFrequency(frequencyHz, sampleRate)) / sampleRate
+  const phase = -Math.atan2(
+    pole * Math.sin(omega),
+    1 - pole * Math.cos(omega),
+  )
+  return (phase * 180) / Math.PI
+}
+
 export function phaseDelaySeconds(frequencyHz, cutoffHz) {
   if (frequencyHz <= 0) return 0
   return Math.abs(phaseDegreesAt(frequencyHz, cutoffHz)) / 360 / frequencyHz
@@ -82,8 +137,19 @@ export function simulationFrequencyLimits(sampleRateHz) {
   const minimum = 0.001
   return {
     minimum,
-    maximum: Math.max(minimum, positive(sampleRateHz) * 0.45),
+    maximum: Math.max(minimum, positive(sampleRateHz) * 2),
   }
+}
+
+export function createAliasingFoldResponse(sampleRateHz, pointCount = 321) {
+  const sampleRate = positive(sampleRateHz)
+  const safePointCount = Math.max(5, Math.round(pointCount))
+  const maximumFrequency = sampleRate * 2
+
+  return Array.from({ length: safePointCount }, (_, index) => {
+    const frequency = (index / (safePointCount - 1)) * maximumFrequency
+    return { x: frequency, y: aliasFrequency(frequency, sampleRate) }
+  })
 }
 
 export function settlingTime(tauSeconds, fraction = 0.95) {
@@ -274,10 +340,13 @@ export function createSimulation({
   const stepFinal = clamp(Number.isFinite(stepFinalValue) ? stepFinalValue : 1, -1_000_000, 1_000_000)
   const initialState = clamp(Number.isFinite(initialOutput) ? initialOutput : 0, -1_000_000, 1_000_000)
   const visibleCycles = clamp(cyclesToShow, 0.25, 100)
+  const signalAliasing = aliasingInfo(signalFrequency, sampleRate)
+  const interferenceAliasing = aliasingInfo(interferenceFrequency, sampleRate)
   const minimumDuration = 24 / sampleRate
+  const visibleSignalFrequency = positive(signalAliasing.aliasFrequency, sampleRate)
   const naturalDuration = inputType === 'step'
     ? 6 * tauFromCutoff(cutoff)
-    : visibleCycles / signalFrequency
+    : visibleCycles / visibleSignalFrequency
   const duration = durationSeconds === undefined
     ? clamp(Math.max(naturalDuration, minimumDuration), minimumDuration, 1_000_000)
     : clamp(positive(durationSeconds), minimumDuration, 1_000_000)
@@ -332,13 +401,62 @@ export function createSimulation({
     simulatedIndex += 1
   }
 
+  const analogInput = []
+  let analogTraceCompressed = false
+  if (inputType !== 'step') {
+    const highestAnalogFrequency = Math.max(
+      signalFrequency,
+      interference > 0 ? interferenceFrequency : 0,
+    )
+    const analogPointBudget = Math.round(clamp(maxRenderedPoints * 6, 720, 4_800))
+    const desiredAnalogPoints = Math.ceil(duration * highestAnalogFrequency * 12) + 1
+    analogTraceCompressed = desiredAnalogPoints > analogPointBudget
+    const analogPointCount = Math.round(clamp(
+      desiredAnalogPoints,
+      Math.min(240, analogPointBudget),
+      analogPointBudget,
+    ))
+
+    for (let index = 0; index < analogPointCount; index += 1) {
+      const time = (index / (analogPointCount - 1)) * duration
+      analogInput.push({
+        x: time,
+        y: inputSample({
+          type: inputType,
+          time,
+          duration,
+          signalFrequency,
+          signalAmplitude: amplitude,
+          signalOffset: offset,
+          signalPhaseDegrees: signalPhase,
+          noiseLevel: 0,
+          noiseSeed: safeNoiseSeed,
+          interferenceFrequency,
+          interferenceLevel: interference,
+          interferencePhaseDegrees: interferencePhase,
+          squareDutyCycle: dutyCycle,
+          stepTimeRatio: stepStart,
+          stepInitialValue: stepInitial,
+          stepFinalValue: stepFinal,
+          index,
+        }),
+      })
+    }
+  }
+
   return {
+    analogInput,
+    analogTraceCompressed,
     input,
     output,
     duration,
     alpha,
     signalFrequency,
+    signalAliasFrequency: signalAliasing.aliasFrequency,
+    signalAliasing,
     interferenceFrequency,
+    interferenceAliasFrequency: interferenceAliasing.aliasFrequency,
+    interferenceAliasing,
     sampleCount,
     simulatedSteps,
     integrationStride,

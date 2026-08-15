@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  aliasFrequency,
+  aliasingInfo,
   alphaBackwardEuler,
   alphaZoh,
+  createAliasingFoldResponse,
   createSimulation,
   cutoffFromTau,
+  discreteMagnitudeAt,
+  discretePhaseDegreesAt,
   gainDbAt,
   magnitudeAt,
   phaseDegreesAt,
@@ -37,9 +42,48 @@ describe('first-order low-pass relationships', () => {
     expect(alphaBackwardEuler(2.5, 100)).toBeCloseTo(0.13576, 4)
   })
 
-  it('keeps the simulator frequency range below Nyquist without an arbitrary cap', () => {
-    expect(simulationFrequencyLimits(100)).toEqual({ minimum: 0.001, maximum: 45 })
-    expect(simulationFrequencyLimits(10000)).toEqual({ minimum: 0.001, maximum: 4500 })
+  it('opens the simulator input range across four Nyquist zones', () => {
+    expect(simulationFrequencyLimits(100)).toEqual({ minimum: 0.001, maximum: 200 })
+    expect(simulationFrequencyLimits(10000)).toEqual({ minimum: 0.001, maximum: 20000 })
+  })
+
+  it('folds analog frequencies into the first Nyquist zone', () => {
+    expect(aliasFrequency(400, 1000)).toBe(400)
+    expect(aliasFrequency(600, 1000)).toBe(400)
+    expect(aliasFrequency(900, 1000)).toBe(100)
+    expect(aliasFrequency(1100, 1000)).toBe(100)
+    expect(aliasFrequency(1600, 1000)).toBe(400)
+
+    expect(aliasingInfo(600, 1000)).toMatchObject({
+      aliasFrequency: 400,
+      nyquistZone: 2,
+      mirrored: true,
+      aliased: true,
+    })
+    expect(aliasingInfo(1100, 1000)).toMatchObject({
+      aliasFrequency: 100,
+      nyquistZone: 3,
+      mirrored: false,
+      aliased: true,
+    })
+  })
+
+  it('shows the same digital response for frequencies that sample to one alias', () => {
+    expect(discreteMagnitudeAt(600, 40, 1000)).toBeCloseTo(
+      discreteMagnitudeAt(400, 40, 1000),
+      12,
+    )
+    expect(discretePhaseDegreesAt(600, 40, 1000)).toBeCloseTo(
+      discretePhaseDegreesAt(400, 40, 1000),
+      12,
+    )
+  })
+
+  it('creates the repeated triangular Nyquist folding curve', () => {
+    const points = createAliasingFoldResponse(1000, 9)
+    expect(points.map((point) => point.y)).toEqual([
+      0, 250, 500, 250, 0, 250, 500, 250, 0,
+    ])
   })
 })
 
@@ -107,7 +151,7 @@ describe('discrete simulation', () => {
     expect(positiveSamples / result.input.length).toBeCloseTo(0.25, 1)
   })
 
-  it('accepts signal and interference frequencies up to the sampling safety limit', () => {
+  it('keeps signal and interference frequencies inside the configured analog input range', () => {
     const result = createSimulation({
       cutoffHz: 2.5,
       sampleRateHz: 100,
@@ -119,6 +163,25 @@ describe('discrete simulation', () => {
 
     expect(result.signalFrequency).toBe(40)
     expect(result.interferenceFrequency).toBe(44)
+  })
+
+  it('keeps out-of-band analog inputs and reports their sampled aliases', () => {
+    const result = createSimulation({
+      cutoffHz: 10,
+      sampleRateHz: 100,
+      signalFrequencyHz: 60,
+      interferenceFrequencyHz: 110,
+      interferenceLevel: 0.2,
+      durationSeconds: 1,
+      maxRenderedPoints: 300,
+    })
+
+    expect(result.signalFrequency).toBe(60)
+    expect(result.signalAliasFrequency).toBe(40)
+    expect(result.interferenceFrequency).toBe(110)
+    expect(result.interferenceAliasFrequency).toBe(10)
+    expect(result.signalAliasing.mirrored).toBe(true)
+    expect(result.analogInput.length).toBeGreaterThan(result.input.length)
   })
 
   it('bounds integration work for MHz sampling while preserving real sample statistics', () => {

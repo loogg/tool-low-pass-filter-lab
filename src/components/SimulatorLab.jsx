@@ -4,15 +4,18 @@ import EngineeringFrequencyInput from './EngineeringFrequencyInput.jsx'
 import LineChart from './LineChart.jsx'
 import SectionIntro from './SectionIntro.jsx'
 import {
+  aliasingInfo,
   clamp,
+  createAliasingFoldResponse,
   createSimulation,
   CUTOFF_FREQUENCY_RANGE,
+  discreteGainDbAt,
+  discreteMagnitudeAt,
+  discretePhaseDegreesAt,
   gainDbAt,
   groupDelaySecondsAt,
   magnitudeAt,
   nyquistFrequency,
-  phaseDegreesAt,
-  phaseDelaySeconds,
   SAMPLE_RATE_RANGE,
   samplePeriodSeconds,
   settlingTime,
@@ -34,10 +37,10 @@ const INPUT_TYPES = [
   { id: 'step', label: '阶跃' },
 ]
 
-function seriesDomain(input, output) {
+function seriesDomain(...dataSets) {
   let minimum = Number.POSITIVE_INFINITY
   let maximum = Number.NEGATIVE_INFINITY
-  for (const data of [input, output]) {
+  for (const data of dataSets) {
     for (const point of data) {
       minimum = Math.min(minimum, point.y)
       maximum = Math.max(maximum, point.y)
@@ -45,6 +48,22 @@ function seriesDomain(input, output) {
   }
   const span = Math.max(0.2, maximum - minimum)
   return [minimum - span * 0.12, maximum + span * 0.12]
+}
+
+function describeAliasing(info) {
+  if (!info.aliased) return '第 1 Nyquist 区 · 不折回'
+  return `第 ${info.nyquistZone} Nyquist 区 · ${info.mirrored ? '镜像折回' : '平移折回'}`
+}
+
+function formatFoldAxis(value, sampleRateHz) {
+  const nyquist = sampleRateHz / 2
+  const ratio = value / nyquist
+  if (ratio < 0.01) return '0'
+  if (Math.abs(ratio - 1) < 0.01) return 'fN'
+  if (Math.abs(ratio - 2) < 0.01) return 'fs'
+  if (Math.abs(ratio - 3) < 0.01) return '3fN'
+  if (Math.abs(ratio - 4) < 0.01) return '2fs'
+  return formatFrequency(value)
 }
 
 function describeFrequencyZone(ratio) {
@@ -241,19 +260,28 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
     frequencyLimits.maximum,
   )
   const samplingSafe = simCutoffHz <= simSampleRateHz * 0.45
+  const signalAliasing = aliasingInfo(activeSignalFrequency, simSampleRateHz)
+  const interferenceAliasing = aliasingInfo(activeInterferenceFrequency, simSampleRateHz)
 
   const signalPresets = normalizeFrequencyPresets([
     { id: 'slow', label: '0.2×fc', value: simCutoffHz * 0.2 },
     { id: 'cutoff', label: '1×fc', value: simCutoffHz },
-    { id: 'fast', label: '5×fc', value: simCutoffHz * 5 },
     { id: 'sample-edge', label: '0.4×fs', value: simSampleRateHz * 0.4 },
+    { id: 'first-fold', label: '0.6×fs', value: simSampleRateHz * 0.6 },
+    { id: 'above-fs', label: '1.1×fs', value: simSampleRateHz * 1.1 },
   ], frequencyLimits.minimum, frequencyLimits.maximum)
   const interferencePresets = normalizeFrequencyPresets([
     { id: 'interference-cutoff', label: '1×fc', value: simCutoffHz },
-    { id: 'interference-five', label: '5×fc', value: simCutoffHz * 5 },
     { id: 'interference-ten', label: '10×fc', value: simCutoffHz * 10 },
-    { id: 'interference-edge', label: '0.4×fs', value: simSampleRateHz * 0.4 },
+    { id: 'interference-edge', label: '0.9×fs', value: simSampleRateHz * 0.9 },
+    { id: 'interference-passband', label: '1.02×fs', value: simSampleRateHz * 1.02 },
   ], frequencyLimits.minimum, frequencyLimits.maximum)
+  const aliasingPresets = [0.6, 0.9, 1.1, 1.6].map((ratio) => ({
+    id: `alias-${ratio}`,
+    ratio,
+    value: simSampleRateHz * ratio,
+    alias: aliasingInfo(simSampleRateHz * ratio, simSampleRateHz).aliasFrequency,
+  }))
   const cutoffPresets = normalizeFrequencyPresets([
     { id: 'global-fc', label: '顶部 fc', value: cutoffHz },
     { id: 'fc-one', label: '1 Hz', value: 1 },
@@ -273,13 +301,13 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
       sampleRateHz: simSampleRateHz,
       method: simMethod,
       inputType,
-      signalFrequencyHz: activeSignalFrequency,
+      signalFrequencyHz,
       signalAmplitude,
       signalOffset,
       signalPhaseDegrees,
       noiseLevel,
       noiseSeed,
-      interferenceFrequencyHz: activeInterferenceFrequency,
+      interferenceFrequencyHz,
       interferenceLevel,
       interferencePhaseDegrees,
       squareDutyCycle,
@@ -297,13 +325,13 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
       simSampleRateHz,
       simMethod,
       inputType,
-      activeSignalFrequency,
+      signalFrequencyHz,
       signalAmplitude,
       signalOffset,
       signalPhaseDegrees,
       noiseLevel,
       noiseSeed,
-      activeInterferenceFrequency,
+      interferenceFrequencyHz,
       interferenceLevel,
       interferencePhaseDegrees,
       squareDutyCycle,
@@ -319,19 +347,56 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
     ],
   )
 
-  const yDomain = useMemo(() => seriesDomain(simulation.input, simulation.output), [simulation])
-  const gain = magnitudeAt(activeSignalFrequency, simCutoffHz)
-  const gainDb = gainDbAt(activeSignalFrequency, simCutoffHz)
-  const phase = phaseDegreesAt(activeSignalFrequency, simCutoffHz)
-  const delay = phaseDelaySeconds(activeSignalFrequency, simCutoffHz)
-  const groupDelay = groupDelaySecondsAt(activeSignalFrequency, simCutoffHz)
-  const interferenceGain = magnitudeAt(activeInterferenceFrequency, simCutoffHz)
-  const interferencePhase = phaseDegreesAt(activeInterferenceFrequency, simCutoffHz)
+  const foldResponse = useMemo(
+    () => createAliasingFoldResponse(simSampleRateHz),
+    [simSampleRateHz],
+  )
+  const yDomain = useMemo(
+    () => seriesDomain(simulation.analogInput, simulation.input, simulation.output),
+    [simulation],
+  )
+  const gain = discreteMagnitudeAt(
+    activeSignalFrequency,
+    simCutoffHz,
+    simSampleRateHz,
+    simMethod,
+  )
+  const gainDb = discreteGainDbAt(
+    activeSignalFrequency,
+    simCutoffHz,
+    simSampleRateHz,
+    simMethod,
+  )
+  const analogGain = magnitudeAt(activeSignalFrequency, simCutoffHz)
+  const analogGainDb = gainDbAt(activeSignalFrequency, simCutoffHz)
+  const phase = discretePhaseDegreesAt(
+    activeSignalFrequency,
+    simCutoffHz,
+    simSampleRateHz,
+    simMethod,
+  )
+  const delay = signalAliasing.aliasFrequency > 0
+    ? Math.abs(phase) / 360 / signalAliasing.aliasFrequency
+    : 0
+  const groupDelay = groupDelaySecondsAt(signalAliasing.aliasFrequency, simCutoffHz)
+  const interferenceGain = discreteMagnitudeAt(
+    activeInterferenceFrequency,
+    simCutoffHz,
+    simSampleRateHz,
+    simMethod,
+  )
+  const interferenceAnalogGain = magnitudeAt(activeInterferenceFrequency, simCutoffHz)
+  const interferencePhase = discretePhaseDegreesAt(
+    activeInterferenceFrequency,
+    simCutoffHz,
+    simSampleRateHz,
+    simMethod,
+  )
   const tau = tauFromCutoff(simCutoffHz)
   const time95 = settlingTime(tau, 0.95)
   const time99 = settlingTime(tau, 0.99)
   const rmsRatio = simulation.inputRms > 0 ? simulation.outputRms / simulation.inputRms : 0
-  const frequencyRatio = activeSignalFrequency / simCutoffHz
+  const frequencyRatio = signalAliasing.aliasFrequency / simCutoffHz
   const samplesPerCycle = simSampleRateHz / activeSignalFrequency
   const fundamentalInputAmplitude = inputType === 'square'
     ? (4 * signalAmplitude * Math.sin(Math.PI * squareDutyCycle)) / Math.PI
@@ -376,12 +441,12 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
         { label: '仿真窗口', value: formatSeconds(simulation.duration), detail: `${formatEngineeringRate(simulation.sampleCount, 'samples')}` },
       ]
     : [
-        { label: inputType === 'square' ? '基波理论增益' : '主信号增益', value: formatPercent(gain, 2), detail: `${formatNumber(gainDb, 3)} dB` },
+        { label: 'ADC 看到的频率', value: formatFrequency(signalAliasing.aliasFrequency), detail: signalAliasing.aliased ? `${formatFrequency(activeSignalFrequency)} 已折回` : '未发生折回' },
+        { label: inputType === 'square' ? '数字基波增益' : '数字实际增益', value: formatPercent(gain, 2), detail: `${formatNumber(gainDb, 3)} dB · 按 f_alias` },
         { label: inputType === 'square' ? '输出基波幅值' : '理论输出幅值', value: formatNumber(outputAmplitude, 4), detail: inputType === 'square' ? '方波基波峰值 × |H|' : '输入幅值 × |H|' },
-        { label: '相位滞后', value: `${formatNumber(phase, 2)}°`, detail: `${formatSeconds(delay)} 等效偏移` },
-        { label: '每周期采样点', value: formatEngineeringRate(samplesPerCycle, 'samples/cycle'), detail: 'fs / f' },
+        { label: '模拟原型 @ fin', value: formatPercent(analogGain, 2), detail: `${formatNumber(analogGainDb, 3)} dB · 若滤波在 ADC 前` },
+        { label: '原频率采样点', value: formatEngineeringRate(samplesPerCycle, 'samples/cycle'), detail: samplesPerCycle < 2 ? '少于 2 点 / 周期，必然混叠' : 'fs / fin' },
         { label: '整体 RMS', value: formatPercent(rmsRatio, 1), detail: '输出 / 输入' },
-        { label: '数字系数 α', value: formatNumber(simulation.alpha, 7), detail: simMethod === 'zoh' ? 'ZOH' : '后向欧拉' },
       ]
 
   function replay() {
@@ -400,8 +465,8 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
     <section id="simulator" className="content-section simulator-section">
       <SectionIntro
         eyebrow="03 · 独立仿真"
-        title="把滤波器、信号源与数值仿真参数全部展开"
-        description="本区拥有独立的 fc、fs 与离散方法，不会修改顶部全局参数。理论指标始终按真实参数计算；超大采样数会采用可见的分块递推，避免浏览器冻结。"
+        title="把滤波器、采样器与模拟信号源全部展开"
+        description="本区拥有独立的 fc、fs 与离散方法。信号源可跨越 4 个 Nyquist 区；示波器会同时画出采样前模拟波形、ADC 样本与数字滤波输出，让折回不只停留在公式里。"
       />
 
       <section className="simulator-filter-panel" aria-label="仿真器独立滤波参数">
@@ -429,7 +494,7 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
             onChange={setSimSampleRateHz}
             presets={sampleRatePresets}
             accent="accent-lime"
-            hint={`Ts = ${formatSeconds(samplePeriodSeconds(simSampleRateHz))}，Nyquist = ${formatFrequency(nyquistFrequency(simSampleRateHz))}。`}
+            hint={`Ts = ${formatSeconds(samplePeriodSeconds(simSampleRateHz))}，fN = fs/2 = ${formatFrequency(nyquistFrequency(simSampleRateHz))}。`}
           />
           <div className="control-group simulator-method-group">
             <div className="control-group-heading"><span>离散方法</span><small>独立于顶部</small></div>
@@ -443,6 +508,103 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
             </p>
           </div>
         </div>
+      </section>
+
+      <section className={`aliasing-lab-panel ${inputType !== 'step' && signalAliasing.aliased ? 'is-aliasing' : 'is-safe'}`} aria-label="Nyquist 与混叠折返计算">
+        <header>
+          <div>
+            <span>SAMPLING / ALIASING</span>
+            <h3>频率不是越过 fN 就消失，而是折回 0 ～ fN</h3>
+            <p>横轴是采样前的模拟频率 fin，纵轴是 ADC 样本表现出的频率 f_alias；相邻 Nyquist 区交替镜像。</p>
+          </div>
+          <strong>{inputType === 'step' ? '阶跃无单一载波' : describeAliasing(signalAliasing)}</strong>
+        </header>
+
+        <div className="aliasing-lab-layout">
+          <article className="aliasing-fold-chart">
+            <LineChart
+              series={[
+                { label: '折返轨迹', color: '#d7f56d', data: foldResponse, width: 2.4 },
+                ...(inputType === 'step' ? [] : [{
+                  label: '主信号 fin',
+                  color: '#f29a4a',
+                  data: [{ x: activeSignalFrequency, y: signalAliasing.aliasFrequency }],
+                  showLine: false,
+                  showPoints: true,
+                  pointRadius: 5,
+                }]),
+                ...(interferenceLevel <= 0 ? [] : [{
+                  label: '周期干扰',
+                  color: '#0aa39a',
+                  data: [{ x: activeInterferenceFrequency, y: interferenceAliasing.aliasFrequency }],
+                  showLine: false,
+                  showPoints: true,
+                  pointRadius: 4,
+                }]),
+              ]}
+              xDomain={[0, simSampleRateHz * 2]}
+              yDomain={[0, nyquistFrequency(simSampleRateHz) * 1.08]}
+              xTicks={[
+                0,
+                nyquistFrequency(simSampleRateHz),
+                simSampleRateHz,
+                nyquistFrequency(simSampleRateHz) * 3,
+                simSampleRateHz * 2,
+              ]}
+              yTicks={[0, nyquistFrequency(simSampleRateHz) / 2, nyquistFrequency(simSampleRateHz)]}
+              formatX={(value) => formatFoldAxis(value, simSampleRateHz)}
+              formatY={formatFrequency}
+              referenceLines={[
+                { axis: 'x', value: nyquistFrequency(simSampleRateHz), label: '第 1 次折线 · fN', color: '#f29a4a' },
+                { axis: 'x', value: simSampleRateHz, label: 'fs', color: '#0aa39a' },
+              ]}
+              ariaLabel="模拟输入频率经过采样后反复折回第一 Nyquist 区的曲线"
+            />
+            <div className="nyquist-zone-strip" aria-hidden="true">
+              <span>第 1 区 · 正向</span><span>第 2 区 · 镜像</span><span>第 3 区 · 正向</span><span>第 4 区 · 镜像</span>
+            </div>
+          </article>
+
+          <aside className="aliasing-calculation-card">
+            <div className="aliasing-formula-block">
+              <span>程序计算</span>
+              <code>r = f<sub>in</sub> mod f<sub>s</sub></code>
+              <code>f<sub>alias</sub> = min(r, f<sub>s</sub> − r)</code>
+            </div>
+            {inputType === 'step' ? (
+              <p className="aliasing-step-note">阶跃不是单一正弦频率；它包含从低频到高频的宽频谱。采样前仍需限制高频能量，但这里不为它指定唯一的 f_alias。</p>
+            ) : (
+              <dl className="aliasing-live-calculation">
+                <div><dt>模拟输入 fin</dt><dd>{formatFrequency(activeSignalFrequency)}</dd></div>
+                <div><dt>奈奎斯特 fN</dt><dd>{formatFrequency(signalAliasing.nyquistFrequency)}</dd></div>
+                <div><dt>余数 r</dt><dd>{formatFrequency(signalAliasing.remainder)}</dd></div>
+                <div className="is-result"><dt>ADC 看到 f_alias</dt><dd>{formatFrequency(signalAliasing.aliasFrequency)}</dd></div>
+                <div><dt>心算</dt><dd>|fin − {signalAliasing.nearestSampleMultiple}fs|</dd></div>
+              </dl>
+            )}
+            <div className="aliasing-presets" role="group" aria-label="混叠折回示例">
+              {aliasingPresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    setInputType('sine')
+                    setSignalFrequencyHz(preset.value)
+                    setNoiseLevel(0)
+                    setInterferenceLevel(0)
+                    setWindowMode('auto')
+                    replay()
+                  }}
+                >
+                  <span>{formatNumber(preset.ratio, 2)}fs</span>
+                  <strong>→ {formatFrequency(preset.alias)}</strong>
+                </button>
+              ))}
+            </div>
+          </aside>
+        </div>
+
+        <p className="aliasing-core-warning"><strong>关键区别：</strong>ADC 后的数字低通只会收到 {inputType === 'step' ? '已经采样的宽带序列' : <><b>{formatFrequency(signalAliasing.aliasFrequency)}</b> 这条离散序列</>}，它不知道原来是 {inputType === 'step' ? '哪些模拟频率叠加而来' : <b>{formatFrequency(activeSignalFrequency)}</b>}；要阻止混叠，必须在 ADC 前使用模拟抗混叠滤波器。</p>
       </section>
 
       <div className="simulator-layout">
@@ -476,7 +638,9 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
               maximum={frequencyLimits.maximum}
               onChange={setSignalFrequencyHz}
               presets={signalPresets}
-              hint={`f / fc = ${formatNumber(frequencyRatio, 4)}：${describeFrequencyZone(frequencyRatio)}。`}
+              hint={signalAliasing.aliased
+                ? `${formatFrequency(activeSignalFrequency)} 折回为 ${formatFrequency(signalAliasing.aliasFrequency)}；${describeAliasing(signalAliasing)}。`
+                : `ADC 看到 ${formatFrequency(signalAliasing.aliasFrequency)}；f_alias / fc = ${formatNumber(frequencyRatio, 4)}：${describeFrequencyZone(frequencyRatio)}。`}
             />
           ) : (
             <div className="control-group step-summary-card">
@@ -504,11 +668,26 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
               fs {formatFrequency(simSampleRateHz)} · 窗口 {formatSeconds(simulation.duration)} · {simulation.approximated ? `每步合并 ${formatInteger(simulation.integrationStride)} samples` : '逐采样递推'}
             </span>
           </div>
+          {inputType === 'step' ? null : (
+            <div className={`scope-sampling-status ${signalAliasing.aliased ? 'is-aliasing' : 'is-safe'}`}>
+              <span>{signalAliasing.aliased ? 'ALIAS DETECTED' : 'BAND-LIMITED'}</span>
+              <p>
+                {signalAliasing.aliased
+                  ? <>模拟输入 <strong>{formatFrequency(activeSignalFrequency)}</strong> 越过 fN，橙线仍显示原波形；青色采样点连接后表现为 <strong>{formatFrequency(signalAliasing.aliasFrequency)}</strong>。</>
+                  : <>主信号低于 fN；模拟波形与 ADC 样本对应同一频率 <strong>{formatFrequency(activeSignalFrequency)}</strong>。</>}
+                {simulation.analogTraceCompressed ? ' 橙色模拟参考线受绘图点预算压缩，不用于精确读频。' : null}
+              </p>
+            </div>
+          )}
           <LineChart
             key={animationKey}
-            series={[
-              { label: '输入 x[n]', color: '#f29a4a', data: simulation.input, dash: '7 6' },
-              { label: '输出 y[n]', color: '#d7f56d', data: simulation.output },
+            series={inputType === 'step' ? [
+              { label: 'ADC 输入 x[n]', color: '#f29a4a', data: simulation.input, dash: '7 6', showPoints: true, pointRadius: 2 },
+              { label: '数字输出 y[n]', color: '#d7f56d', data: simulation.output },
+            ] : [
+              { label: '采样前模拟参考（不含随机噪声）', color: '#f29a4a', data: simulation.analogInput, dash: '6 5', width: 1.45, opacity: 0.62 },
+              { label: 'ADC 样本 x[n]', color: '#0aa39a', data: simulation.input, width: 1.5, showPoints: true, pointRadius: 2.3 },
+              { label: '数字输出 y[n]', color: '#d7f56d', data: simulation.output, width: 2.7 },
             ]}
             xDomain={[0, simulation.duration]}
             yDomain={yDomain}
@@ -516,7 +695,7 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
             yTicks={Array.from({ length: 5 }, (_, index) => yDomain[0] + ((yDomain[1] - yDomain[0]) * index) / 4)}
             formatX={formatSeconds}
             formatY={(value) => formatNumber(value, 3)}
-            ariaLabel="输入信号与一阶低通滤波输出的离散时域模拟"
+            ariaLabel="采样前模拟信号、ADC 离散样本与一阶低通滤波输出的时域对照"
             showPlayhead
             playing={playing}
           />
@@ -568,7 +747,9 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
               presets={interferencePresets}
               accent="accent-lime"
               className="nested-frequency-control"
-              hint={`理论保留 ${formatPercent(interferenceGain, 2)}，相位 ${formatNumber(interferencePhase, 2)}°。`}
+              hint={interferenceAliasing.aliased
+                ? `模拟干扰 ${formatFrequency(activeInterferenceFrequency)} 折回 ${formatFrequency(interferenceAliasing.aliasFrequency)}；数字滤波后保留 ${formatPercent(interferenceGain, 2)}。`
+                : `未折回；数字滤波后保留 ${formatPercent(interferenceGain, 2)}，相位 ${formatNumber(interferencePhase, 2)}°。`}
             />
             <RangeField id="interference-phase" label="周期干扰相位" value={interferencePhaseDegrees} minimum={-180} maximum={180} step={1} onChange={setInterferencePhaseDegrees} unit="°" minimumLabel="−180°" maximumLabel="180°" />
           </div>
@@ -607,6 +788,24 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
               <ResultMetric label="Nyquist" value={formatFrequency(nyquistFrequency(simSampleRateHz))} detail={samplingSafe ? 'fc 位于安全区间' : 'fc 超过建议上限'} />
             </ResultGroup>
 
+            <ResultGroup eyebrow="ALIASING" title="Nyquist 与折回">
+              {inputType === 'step' ? (
+                <>
+                  <ResultMetric label="无歧义频带" value={`0 ～ ${formatFrequency(nyquistFrequency(simSampleRateHz))}`} detail="阶跃为宽带信号，没有单一 alias" />
+                  <ResultMetric label="采样前要求" value="模拟限带" detail="ADC 前抑制高于 fN 的能量" />
+                  <ResultMetric label="采样后" value="无法反推" detail="不同模拟频率可能得到相同样本" />
+                </>
+              ) : (
+                <>
+                  <ResultMetric label="模拟 fin" value={formatFrequency(activeSignalFrequency)} detail={describeAliasing(signalAliasing)} />
+                  <ResultMetric label="ADC 看到" value={formatFrequency(signalAliasing.aliasFrequency)} detail={`r = ${formatFrequency(signalAliasing.remainder)}`} />
+                  <ResultMetric label="最近 fs 整数倍" value={`${signalAliasing.nearestSampleMultiple}fs`} detail={`|fin − ${signalAliasing.nearestSampleMultiple}fs|`} />
+                  <ResultMetric label="方向" value={signalAliasing.mirrored ? '镜像' : '正向'} detail={`第 ${signalAliasing.nyquistZone} Nyquist 区`} />
+                  <ResultMetric label="原频率采样密度" value={formatNumber(samplesPerCycle, 4)} detail={samplesPerCycle < 2 ? '< 2 samples/cycle' : 'samples/cycle'} />
+                </>
+              )}
+            </ResultGroup>
+
             <ResultGroup eyebrow="SIGNAL" title={inputType === 'step' ? '阶跃时域结果' : '主信号稳态结果'}>
               {inputType === 'step' ? (
                 <>
@@ -617,23 +816,27 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
                 </>
               ) : (
                 <>
-                  <ResultMetric label="f / fc" value={formatNumber(frequencyRatio, 5)} detail={describeFrequencyZone(frequencyRatio)} />
-                  <ResultMetric label="幅值增益" value={formatPercent(gain, 3)} detail={`${formatNumber(gainDb, 4)} dB`} />
+                  <ResultMetric label="f_alias / fc" value={formatNumber(frequencyRatio, 5)} detail={describeFrequencyZone(frequencyRatio)} />
+                  <ResultMetric label="ADC 后数字增益" value={formatPercent(gain, 3)} detail={`${formatNumber(gainDb, 4)} dB · 按 f_alias`} />
+                  <ResultMetric label="ADC 前模拟原型" value={formatPercent(analogGain, 3)} detail={`${formatNumber(analogGainDb, 4)} dB · 按 fin`} />
                   {inputType === 'square' ? <ResultMetric label="输入基波幅值" value={formatNumber(fundamentalInputAmplitude, 5)} detail="4A·sin(πD) / π" /> : null}
                   <ResultMetric label={inputType === 'square' ? '输出基波幅值' : '输出幅值'} value={formatNumber(outputAmplitude, 5)} detail={inputType === 'square' ? '基波峰值 × |H|' : 'Ain × |H|'} />
                   {inputType === 'square' ? <ResultMetric label="方波 DC 分量" value={formatNumber(squareDcLevel, 5)} detail="offset + A(2D − 1)，直流稳态不衰减" /> : null}
-                  <ResultMetric label="相位" value={`${formatNumber(phase, 3)}°`} detail={`等效偏移 ${formatSeconds(delay)}`} />
-                  <ResultMetric label="群时延" value={formatSeconds(groupDelay)} detail="−dφ/dω" />
+                  <ResultMetric label="数字相位" value={`${formatNumber(phase, 3)}°`} detail={`相对 f_alias · ${formatSeconds(delay)} 等效偏移`} />
+                  <ResultMetric label="模拟原型群时延" value={formatSeconds(groupDelay)} detail="按 f_alias 观察" />
+                  {inputType === 'square' ? <ResultMetric label="谐波混叠" value="逐次折回" detail="方波每个奇次谐波需分别计算 alias" /> : null}
                 </>
               )}
             </ResultGroup>
 
             <ResultGroup eyebrow="DISTURBANCE" title="噪声与干扰">
               <ResultMetric label="随机噪声比例" value={formatNumber(noiseLevel, 4)} detail={`seed ${noiseSeed}`} />
-              <ResultMetric label="干扰频率" value={formatFrequency(activeInterferenceFrequency)} detail={`${formatNumber(activeInterferenceFrequency / simCutoffHz, 4)}×fc`} />
-              <ResultMetric label="干扰增益" value={formatPercent(interferenceGain, 3)} detail={`${formatNumber(20 * Math.log10(interferenceGain), 4)} dB`} />
-              <ResultMetric label="干扰输出幅值" value={formatNumber(interferenceOutputAmplitude, 5)} detail="Ain × 干扰比例 × |H|" />
-              <ResultMetric label="干扰相位" value={`${formatNumber(interferencePhase, 3)}°`} detail={`源相位 ${formatNumber(interferencePhaseDegrees, 1)}°`} />
+              <ResultMetric label="模拟干扰频率" value={formatFrequency(activeInterferenceFrequency)} detail={`${formatNumber(activeInterferenceFrequency / simCutoffHz, 4)}×fc`} />
+              <ResultMetric label="干扰折回" value={formatFrequency(interferenceAliasing.aliasFrequency)} detail={describeAliasing(interferenceAliasing)} />
+              <ResultMetric label="ADC 后数字增益" value={formatPercent(interferenceGain, 3)} detail={`${formatNumber(20 * Math.log10(Math.max(interferenceGain, 1e-12)), 4)} dB`} />
+              <ResultMetric label="ADC 前模拟原型" value={formatPercent(interferenceAnalogGain, 3)} detail="若滤波器位于采样前" />
+              <ResultMetric label="干扰输出幅值" value={formatNumber(interferenceOutputAmplitude, 5)} detail="Ain × 干扰比例 × 数字 |H|" />
+              <ResultMetric label="数字相位" value={`${formatNumber(interferencePhase, 3)}°`} detail={`源相位 ${formatNumber(interferencePhaseDegrees, 1)}°`} />
             </ResultGroup>
 
             <ResultGroup eyebrow="COMPUTE" title="窗口与计算负载">

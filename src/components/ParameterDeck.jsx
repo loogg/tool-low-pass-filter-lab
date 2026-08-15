@@ -208,7 +208,8 @@ export default function ParameterDeck({
             <Metric label="采样周期 Ts" value={formatSeconds(samplePeriod)} detail="Ts = 1 / fs" />
             <Metric label="数字系数 α" value={formatNumber(alpha, 8)} detail={method === 'zoh' ? 'ZOH 映射' : '后向欧拉'} />
             <Metric label="频率比 fc/fs" value={formatNumber(frequencyRatio, 6)} detail="建议不高于 0.45" />
-            <Metric label="奈奎斯特频率" value={formatFrequency(nyquist)} detail="fs / 2" />
+            <Metric label="奈奎斯特频率 fN" value={formatFrequency(nyquist)} detail="fN = fs / 2" />
+            <Metric label="无歧义频带" value={`0 ～ ${formatFrequency(nyquist)}`} detail="超过 fN 会折回，不是消失" />
           </MetricGroup>
 
           <MetricGroup eyebrow="TIME DOMAIN" title="时域响应">
@@ -232,6 +233,37 @@ export default function ParameterDeck({
             <Metric label="状态量" value="y + α" detail="float 实现通常 8 bytes" />
           </MetricGroup>
         </div>
+
+        <section className="sampling-theory-panel" aria-label="Nyquist 与混叠折回说明">
+          <div className="sampling-theory-copy">
+            <span>SAMPLING BOUNDARY</span>
+            <h4>奈奎斯特频率是“开始产生歧义”的边界</h4>
+            <p>当前 <strong>fN = fs / 2 = {formatFrequency(nyquist)}</strong>。高于它的模拟频率不会被 ADC 自动丢掉，而会与更低频率产生完全相同的离散样本。</p>
+          </div>
+
+          <div className="sampling-fold-ruler" role="img" aria-label="频率轴在每个奈奎斯特区交替正向与镜像折回">
+            <div className="sampling-fold-zones">
+              <span><b>第 1 区</b><i>0 → fN</i></span>
+              <span><b>第 2 区</b><i>fN ← 0</i></span>
+              <span><b>第 3 区</b><i>0 → fN</i></span>
+              <span><b>第 4 区</b><i>fN ← 0</i></span>
+            </div>
+            <div className="sampling-fold-scale">
+              <span>0</span>
+              <span>{formatFrequency(nyquist)}</span>
+              <span>{formatFrequency(sampleRateHz)}</span>
+              <span>{formatFrequency(nyquist * 3)}</span>
+              <span>{formatFrequency(sampleRateHz * 2)}</span>
+            </div>
+          </div>
+
+          <div className="sampling-formula-card">
+            <span>通用计算</span>
+            <code>r = f<sub>in</sub> mod f<sub>s</sub></code>
+            <code>f<sub>alias</sub> = min(r, f<sub>s</sub> − r)</code>
+            <small>当前示例：0.6fs = {formatFrequency(sampleRateHz * 0.6)} → 0.4fs = <strong>{formatFrequency(sampleRateHz * 0.4)}</strong></small>
+          </div>
+        </section>
 
         <p className="alpha-explanation">
           <strong>α 到底表示什么：</strong>
