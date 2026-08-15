@@ -184,6 +184,30 @@ describe('discrete simulation', () => {
     expect(result.analogInput.length).toBeGreaterThan(result.input.length)
   })
 
+  it('builds a phase-correct continuous reference for a mirrored alias', () => {
+    const result = createSimulation({
+      cutoffHz: 10,
+      sampleRateHz: 100,
+      signalFrequencyHz: 60,
+      signalAmplitude: 1.7,
+      signalOffset: 0.4,
+      signalPhaseDegrees: 25,
+      noiseLevel: 0,
+      interferenceLevel: 0,
+      durationSeconds: 0.2,
+      maxRenderedPoints: 300,
+    })
+    const aliasPhase = (result.aliasReferencePhaseDegrees * Math.PI) / 180
+
+    expect(result.signalAliasFrequency).toBe(40)
+    expect(result.aliasReferencePhaseDegrees).toBe(155)
+    expect(result.aliasReference.length).toBeGreaterThan(100)
+    for (const point of result.input.slice(0, 12)) {
+      const expected = 0.4 + 1.7 * Math.sin(2 * Math.PI * 40 * point.x + aliasPhase)
+      expect(point.y).toBeCloseTo(expected, 9)
+    }
+  })
+
   it('bounds integration work for MHz sampling while preserving real sample statistics', () => {
     const result = createSimulation({
       cutoffHz: 1_000_000,

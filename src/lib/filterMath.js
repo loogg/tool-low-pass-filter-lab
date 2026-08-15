@@ -444,9 +444,36 @@ export function createSimulation({
     }
   }
 
+  const aliasReference = []
+  const aliasReferencePhaseDegrees = signalAliasing.mirrored
+    ? 180 - signalPhase
+    : signalPhase
+  if (inputType === 'sine') {
+    const aliasPointBudget = Math.round(clamp(maxRenderedPoints * 3, 360, 2_400))
+    const visibleAliasCycles = duration * Math.max(signalAliasing.aliasFrequency, 1 / duration)
+    const aliasPointCount = Math.round(clamp(
+      Math.ceil(visibleAliasCycles * 24) + 1,
+      Math.min(240, aliasPointBudget),
+      aliasPointBudget,
+    ))
+    const aliasPhaseRadians = (aliasReferencePhaseDegrees * Math.PI) / 180
+
+    for (let index = 0; index < aliasPointCount; index += 1) {
+      const time = (index / (aliasPointCount - 1)) * duration
+      aliasReference.push({
+        x: time,
+        y: offset + amplitude * Math.sin(
+          TWO_PI * signalAliasing.aliasFrequency * time + aliasPhaseRadians,
+        ),
+      })
+    }
+  }
+
   return {
     analogInput,
     analogTraceCompressed,
+    aliasReference,
+    aliasReferencePhaseDegrees,
     input,
     output,
     duration,

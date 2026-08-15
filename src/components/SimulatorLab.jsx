@@ -1,8 +1,6 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { Pause, Play, RotateCcw } from 'lucide-react'
 import EngineeringFrequencyInput from './EngineeringFrequencyInput.jsx'
-import LineChart from './LineChart.jsx'
-import SamplingAliasDiagram from './SamplingAliasDiagram.jsx'
 import SectionIntro from './SectionIntro.jsx'
 import {
   aliasingInfo,
@@ -36,6 +34,9 @@ const INPUT_TYPES = [
   { id: 'square', label: '方波' },
   { id: 'step', label: '阶跃' },
 ]
+
+const SimulatorTimeChart = lazy(() => import('./SimulatorTimeChart.jsx'))
+const SimulatorFrequencyChart = lazy(() => import('./SimulatorFrequencyChart.jsx'))
 
 function seriesDomain(...dataSets) {
   let minimum = Number.POSITIVE_INFINITY
@@ -255,66 +256,98 @@ function MetricCluster({ eyebrow, title, metrics }) {
 function TransferResponsePanel({
   response,
   cutoffHz,
-  aliasFrequencyHz,
+  measurementFrequencyHz,
   inputType,
   gain,
   gainDb,
   phase,
   method,
 }) {
-  const [minimumFrequency, maximumFrequency] = response.domain
-  const referenceLines = []
-  if (cutoffHz >= minimumFrequency && cutoffHz <= maximumFrequency) {
-    referenceLines.push({ axis: 'x', value: cutoffHz, label: 'fc', color: '#f29a4a' })
-  }
-  if (aliasFrequencyHz >= minimumFrequency && aliasFrequencyHz <= maximumFrequency) {
-    referenceLines.push({ axis: 'x', value: aliasFrequencyHz, label: 'f_alias', color: '#d7f56d' })
-  }
-
   return (
     <section className="simulator-analysis-panel simulator-right-card" aria-label="数字滤波器幅相响应">
       <header className="simulator-card-heading">
-        <div><span>FREQUENCY RESPONSE</span><h3>数字滤波器的幅频与相频</h3><p>曲线按当前 fc、fs 与离散方法计算；测量标记使用 ADC 实际看到的 f_alias。</p></div>
+        <div><span>02 / FREQUENCY RESPONSE</span><h3>一张图对照幅值衰减与相位滞后</h3><p>共用对数频率轴，左轴读取 dB，右轴读取相位；图例可单独开关，滚轮可缩放频段。</p></div>
         <div className="analysis-current-point">
-          <span>{inputType === 'step' ? '参考频点' : '@ f_alias'}</span>
+          <span>{inputType === 'step' ? '@ fc' : '@ f_alias'}</span>
           <strong>{formatNumber(gainDb, 3)} dB</strong>
           <small>{formatPercent(gain, 2)} · {formatNumber(phase, 2)}°</small>
         </div>
       </header>
-      <div className="simulator-analysis-grid">
-        <article>
-          <header><span>MAGNITUDE</span><strong>|H(e<sup>jω</sup>)|</strong></header>
-          <LineChart
-            series={[{ label: '数字增益', color: '#d7f56d', data: response.gain }]}
-            xDomain={response.domain}
-            yDomain={response.gainDomain}
-            xTicks={response.ticks}
-            yTicks={[response.gainDomain[0], response.gainDomain[0] / 2, -20, -3, 0].filter((value, index, values) => value >= response.gainDomain[0] && values.indexOf(value) === index).sort((a, b) => a - b)}
-            xScale="log"
-            formatX={formatFrequency}
-            formatY={(value) => `${formatNumber(value, 0)} dB`}
-            referenceLines={referenceLines}
-            ariaLabel="当前数字一阶低通滤波器的幅频响应"
-          />
-        </article>
-        <article>
-          <header><span>PHASE</span><strong>∠H(e<sup>jω</sup>)</strong></header>
-          <LineChart
-            series={[{ label: '数字相位', color: '#0aa39a', data: response.phase }]}
-            xDomain={response.domain}
-            yDomain={[-92, 2]}
-            xTicks={response.ticks}
-            yTicks={[-90, -75, -60, -45, -30, -15, 0]}
-            xScale="log"
-            formatX={formatFrequency}
-            formatY={(value) => `${formatNumber(value, 0)}°`}
-            referenceLines={referenceLines}
-            ariaLabel="当前数字一阶低通滤波器的相频响应"
-          />
-        </article>
-      </div>
+      <Suspense fallback={<ChartLoadingFallback label="正在加载专业幅相分析控件" />}>
+        <SimulatorFrequencyChart
+          response={response}
+          cutoffHz={cutoffHz}
+          measurementFrequencyHz={measurementFrequencyHz}
+          gainDb={gainDb}
+          phase={phase}
+        />
+      </Suspense>
       <footer><code>{method === 'zoh' ? 'ZOH: α = 1 − exp(−2πfc/fs)' : 'Backward Euler: α = 2πfc/(fs + 2πfc)'}</code><span>数字频率只在 0 ～ fN 内唯一</span></footer>
     </section>
+  )
+}
+
+function ChartLoadingFallback({ label }) {
+  return (
+    <div className="echart-loading-state" role="status">
+      <span className="screen-light" />
+      <strong>{label}</strong>
+    </div>
+  )
+}
+
+function LiveAliasingStrip({
+  inputType,
+  signalFrequencyHz,
+  signalInfo,
+  sampleRateHz,
+  presets,
+  onSelectPreset,
+}) {
+  const nyquist = nyquistFrequency(sampleRateHz)
+
+  if (inputType === 'step') {
+    return (
+      <div className="live-alias-console is-step">
+        <div><span>NYQUIST / WIDE SPECTRUM</span><strong>阶跃没有唯一的折回频率</strong></div>
+        <p>阶跃边沿包含宽频谱；ADC 前仍需用模拟抗混叠滤波器限制高于 {formatFrequency(nyquist)} 的能量。</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`live-alias-console ${signalInfo.aliased ? 'is-aliasing' : 'is-safe'}`}>
+      <div className="live-alias-flow" aria-live="polite">
+        <div>
+          <span>模拟输入 fin</span>
+          <strong>{formatFrequency(signalFrequencyHz)}</strong>
+          <small>第 {signalInfo.nyquistZone} Nyquist 区</small>
+        </div>
+        <b aria-hidden="true">
+          <span>ADC</span>
+          <strong>fs {formatFrequency(sampleRateHz)}</strong>
+          <small>fN {formatFrequency(nyquist)}</small>
+        </b>
+        <div className="is-result">
+          <span>数字序列 f_alias</span>
+          <strong>{formatFrequency(signalInfo.aliasFrequency)}</strong>
+          <small>{signalInfo.aliased ? (signalInfo.mirrored ? '镜像折回' : '平移折回') : '未发生折回'}</small>
+        </div>
+      </div>
+      <div className="live-alias-equation">
+        <code>r = fin mod fs = {formatFrequency(signalInfo.remainder)}</code>
+        <code>f_alias = min(r, fs − r) = {formatFrequency(signalInfo.aliasFrequency)}</code>
+      </div>
+      <div className="live-alias-presets" role="group" aria-label="一键切换混叠分析例题">
+        <span>ALIAS PRESETS</span>
+        {presets.map((preset) => (
+          <button key={preset.id} type="button" onClick={() => onSelectPreset(preset.value)}>
+            <small>{formatNumber(preset.ratio, 2)}fs</small>
+            <strong>{formatFrequency(preset.value)} → {formatFrequency(preset.alias)}</strong>
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -323,52 +356,33 @@ function SimulationScope({
   inputType,
   simulation,
   yDomain,
-  signalFrequencyHz,
   signalAliasing,
   sampleRateHz,
   playing,
   metrics,
-  compact = false,
 }) {
   return (
-    <article className={`simulator-screen is-workbench ${compact ? 'is-compact' : ''}`}>
+    <article className="simulator-screen is-workbench is-echarts-scope">
       <div className="screen-topline">
         <div><span className="screen-light" />LIVE SCOPE</div>
         <span>
           fs {formatFrequency(sampleRateHz)} · 窗口 {formatSeconds(simulation.duration)} · {simulation.approximated ? `每步合并 ${formatInteger(simulation.integrationStride)} samples` : '逐采样递推'}
         </span>
       </div>
-      {inputType === 'step' ? null : (
-        <div className={`scope-sampling-status ${signalAliasing.aliased ? 'is-aliasing' : 'is-safe'}`}>
-          <span>{signalAliasing.aliased ? 'ALIAS DETECTED' : 'BAND-LIMITED'}</span>
-          <p>
-            {signalAliasing.aliased
-              ? <>橙线是采样前的 <strong>{formatFrequency(signalFrequencyHz)}</strong> 模拟波；青色采样点组成的序列等价于 <strong>{formatFrequency(signalAliasing.aliasFrequency)}</strong>。</>
-              : <>主信号低于 fN；模拟波形与 ADC 样本对应同一频率 <strong>{formatFrequency(signalFrequencyHz)}</strong>。</>}
-            {simulation.analogTraceCompressed ? ' 橙色参考线已按绘图预算压缩，仅用于观察形状。' : null}
-          </p>
-        </div>
-      )}
-      <LineChart
-        key={animationKey}
-        series={inputType === 'step' ? [
-          { label: 'ADC 输入 x[n]', color: '#f29a4a', data: simulation.input, dash: '7 6', showPoints: true, pointRadius: 2 },
-          { label: '数字输出 y[n]', color: '#d7f56d', data: simulation.output },
-        ] : [
-          { label: '采样前模拟参考', color: '#f29a4a', data: simulation.analogInput, dash: '6 5', width: 1.45, opacity: 0.62 },
-          { label: 'ADC 样本 x[n]', color: '#0aa39a', data: simulation.input, width: 1.5, showPoints: true, pointRadius: 2.3 },
-          { label: '数字输出 y[n]', color: '#d7f56d', data: simulation.output, width: 2.7 },
-        ]}
-        xDomain={[0, simulation.duration]}
-        yDomain={yDomain}
-        xTicks={[0, simulation.duration * 0.25, simulation.duration * 0.5, simulation.duration * 0.75, simulation.duration]}
-        yTicks={Array.from({ length: 5 }, (_, index) => yDomain[0] + ((yDomain[1] - yDomain[0]) * index) / 4)}
-        formatX={formatSeconds}
-        formatY={(value) => formatNumber(value, 3)}
-        ariaLabel="采样前模拟信号、ADC 离散样本与一阶低通滤波输出的时域对照"
-        showPlayhead
-        playing={playing}
-      />
+      <div className="scope-chart-guidance">
+        <span>点击图例即可显示或隐藏单条曲线</span>
+        <small>{inputType === 'step' ? '阶跃输入使用保持线显示 ADC 电平' : signalAliasing.aliased ? '紫色虚线是与 ADC 样本等价的折回参考' : '橙色采样前曲线已提高亮度和线宽'}</small>
+      </div>
+      <Suspense fallback={<ChartLoadingFallback label="正在加载专业时域分析控件" />}>
+        <SimulatorTimeChart
+          simulation={simulation}
+          yDomain={yDomain}
+          inputType={inputType}
+          signalAliasing={signalAliasing}
+          playing={playing}
+          scanKey={animationKey}
+        />
+      </Suspense>
       <div className="scope-readouts is-six" aria-live="polite">
         {metrics.map((metric) => (
           <div key={metric.label}>
@@ -509,7 +523,12 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
   )
 
   const yDomain = useMemo(
-    () => seriesDomain(simulation.analogInput, simulation.input, simulation.output),
+    () => seriesDomain(
+      simulation.analogInput,
+      simulation.aliasReference ?? [],
+      simulation.input,
+      simulation.output,
+    ),
     [simulation],
   )
   const transferResponse = useMemo(
@@ -532,6 +551,27 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
   const analogGainDb = gainDbAt(activeSignalFrequency, simCutoffHz)
   const phase = discretePhaseDegreesAt(
     activeSignalFrequency,
+    simCutoffHz,
+    simSampleRateHz,
+    simMethod,
+  )
+  const responseMeasurementFrequency = inputType === 'step'
+    ? simCutoffHz
+    : signalAliasing.aliasFrequency
+  const responseGain = discreteMagnitudeAt(
+    responseMeasurementFrequency,
+    simCutoffHz,
+    simSampleRateHz,
+    simMethod,
+  )
+  const responseGainDb = discreteGainDbAt(
+    responseMeasurementFrequency,
+    simCutoffHz,
+    simSampleRateHz,
+    simMethod,
+  )
+  const responsePhase = discretePhaseDegreesAt(
+    responseMeasurementFrequency,
     simCutoffHz,
     simSampleRateHz,
     simMethod,
@@ -677,8 +717,8 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
     <section className="content-section simulator-section">
       <SectionIntro
         eyebrow="03 · 专业仿真工作台"
-        title="所有参数在左，所有结果在右"
-        description="不再切换二级 Tab。左栏连续放置信号源、滤波器、采样、干扰与计算预算；右栏固定排列时域、幅相、Nyquist 折回和完整计算结果。"
+        title="参数在左，分析集中在右"
+        description="左栏连续配置完整信号链；右栏用两张专业交互图完成时域、混叠、幅值和相位分析，再集中输出全部计算结果。"
       />
 
       <div className="simulator-workbench is-unified">
@@ -918,12 +958,14 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
           <header className="simulator-visual-heading">
             <div>
               <span>ANALYSIS WALL</span>
-              <h3>时域、幅相、混叠与计算结果</h3>
-              <p>所有视图固定排列在右侧；向下滚动即可完成整条信号链的检查。</p>
+              <h3>集中信号分析台</h3>
+              <p>先在 LIVE 图里分析采样与折回，再用一张双轴图对照幅值和相位。</p>
             </div>
             <div className="visual-heading-chips">
               <span>fc <strong>{formatFrequency(simCutoffHz)}</strong></span>
               <span>fs <strong>{formatFrequency(simSampleRateHz)}</strong></span>
+              {inputType === 'step' ? null : <span>fin <strong>{formatFrequency(activeSignalFrequency)}</strong></span>}
+              {inputType === 'step' ? null : <span>alias <strong>{formatFrequency(signalAliasing.aliasFrequency)}</strong></span>}
               <span>α <strong>{formatNumber(simulation.alpha, 6)}</strong></span>
             </div>
           </header>
@@ -931,15 +973,22 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
           <div className="simulator-all-visual-stack">
             <section className="simulator-time-panel simulator-right-card">
               <header className="simulator-card-heading">
-                <div><span>01 / TIME DOMAIN</span><h3>采样前、ADC 样本与数字输出</h3><p>橙色虚线是模拟参考，青色点是 ADC 数据，黄绿色实线是一阶低通输出。</p></div>
+                <div><span>01 / LIVE SIGNAL ANALYSIS</span><h3>原始信号、采样折回与滤波输出同屏分析</h3><p>橙色模拟信号已强化显示；青色为 ADC 样本，紫色为折回等效参考，黄绿色为数字输出。</p></div>
                 <strong>{inputType === 'step' ? 'STEP RESPONSE' : signalAliasing.aliased ? 'ALIAS ACTIVE' : 'BAND-LIMITED'}</strong>
               </header>
+              <LiveAliasingStrip
+                inputType={inputType}
+                signalFrequencyHz={activeSignalFrequency}
+                signalInfo={signalAliasing}
+                sampleRateHz={simSampleRateHz}
+                presets={aliasingPresets}
+                onSelectPreset={selectAliasingPreset}
+              />
               <SimulationScope
                 animationKey={animationKey + '-unified'}
                 inputType={inputType}
                 simulation={simulation}
                 yDomain={yDomain}
-                signalFrequencyHz={activeSignalFrequency}
                 signalAliasing={signalAliasing}
                 sampleRateHz={simSampleRateHz}
                 playing={playing}
@@ -950,34 +999,17 @@ export default function SimulatorLab({ cutoffHz, sampleRateHz, method }) {
             <TransferResponsePanel
               response={transferResponse}
               cutoffHz={simCutoffHz}
-              aliasFrequencyHz={signalAliasing.aliasFrequency}
+              measurementFrequencyHz={responseMeasurementFrequency}
               inputType={inputType}
-              gain={gain}
-              gainDb={gainDb}
-              phase={phase}
+              gain={responseGain}
+              gainDb={responseGainDb}
+              phase={responsePhase}
               method={simMethod}
             />
 
-            <section className="simulator-alias-panel simulator-right-card">
-              <header className="simulator-card-heading">
-                <div><span>03 / NYQUIST + ALIASING</span><h3>从模拟频率到 ADC 看到的频率</h3><p>公式、频率尺和例题固定保留，不需要进入单独页面。</p></div>
-                <strong>fN {formatFrequency(nyquistFrequency(simSampleRateHz))}</strong>
-              </header>
-              <div className="simulator-alias-content">
-              <SamplingAliasDiagram
-                inputType={inputType}
-                signalFrequencyHz={activeSignalFrequency}
-                signalInfo={signalAliasing}
-                sampleRateHz={simSampleRateHz}
-                presets={aliasingPresets}
-                onSelectPreset={selectAliasingPreset}
-              />
-              </div>
-            </section>
-
             <section className="simulator-results-panel simulator-all-results simulator-right-card">
               <header className="simulator-card-heading">
-                <div><span>04 / CALCULATED VALUES</span><h3>全部理论量与运行预算</h3><p>按信号、滤波、干扰、采样和运行时五组集中输出。</p></div>
+                <div><span>03 / CALCULATED VALUES</span><h3>全部理论量与运行预算</h3><p>按信号、滤波、干扰、采样和运行时五组集中输出。</p></div>
                 <strong className={simulation.approximated ? 'is-approximate' : 'is-exact'}>
                   {simulation.approximated ? `分块 ×${formatInteger(simulation.integrationStride)}` : '逐采样精确递推'}
                 </strong>

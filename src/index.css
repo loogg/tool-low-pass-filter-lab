@@ -6569,3 +6569,427 @@ footer > a {
     grid-template-columns: 1fr;
   }
 }
+
+/* Professional ECharts analysis cockpit -------------------------------- */
+
+.simulator-all-visual-stack > .simulator-analysis-panel {
+  content-visibility: visible;
+}
+
+.live-alias-console {
+  display: grid;
+  gap: 10px;
+  padding: 14px 17px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background:
+    linear-gradient(115deg, rgba(10, 163, 154, 0.075), transparent 48%),
+    rgba(0, 0, 0, 0.105);
+}
+
+.live-alias-console.is-aliasing {
+  background:
+    linear-gradient(115deg, rgba(242, 154, 74, 0.105), transparent 48%),
+    rgba(0, 0, 0, 0.105);
+}
+
+.live-alias-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(118px, 0.72fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.live-alias-flow > div,
+.live-alias-flow > b {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 10px;
+  background: rgba(3, 24, 25, 0.72);
+}
+
+.live-alias-flow > b {
+  position: relative;
+  color: #76958d;
+  border-style: dashed;
+  text-align: center;
+}
+
+.live-alias-flow > b::before,
+.live-alias-flow > b::after {
+  position: absolute;
+  top: 50%;
+  color: #67877f;
+  content: '›';
+  font-family: var(--mono);
+  font-size: 15px;
+  transform: translateY(-50%);
+}
+
+.live-alias-flow > b::before {
+  left: -7px;
+}
+
+.live-alias-flow > b::after {
+  right: -7px;
+}
+
+.live-alias-flow > div.is-result {
+  border-color: rgba(215, 245, 109, 0.24);
+  background: rgba(215, 245, 109, 0.055);
+}
+
+.is-aliasing .live-alias-flow > div.is-result {
+  border-color: rgba(185, 149, 255, 0.35);
+  background: rgba(185, 149, 255, 0.065);
+}
+
+.live-alias-flow span,
+.live-alias-flow small {
+  overflow: hidden;
+  color: #66857d;
+  font-size: 7px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-alias-flow strong {
+  overflow: hidden;
+  color: #e1ebe6;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-alias-flow .is-result strong {
+  color: var(--lime);
+}
+
+.is-aliasing .live-alias-flow .is-result strong {
+  color: #c7a8ff;
+}
+
+.live-alias-equation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.live-alias-equation code {
+  flex: 1 1 220px;
+  padding: 7px 9px;
+  color: #a9beb7;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.13);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.live-alias-presets {
+  display: grid;
+  grid-template-columns: auto repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  align-items: stretch;
+}
+
+.live-alias-presets > span {
+  display: flex;
+  align-items: center;
+  padding-right: 6px;
+  color: #5f7f77;
+  font-family: var(--mono);
+  font-size: 6.5px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.live-alias-presets button {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 7px 8px;
+  color: #a8bbb5;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  outline: 0;
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+  text-align: left;
+}
+
+.live-alias-presets button:hover,
+.live-alias-presets button:focus-visible {
+  border-color: rgba(215, 245, 109, 0.28);
+  background: rgba(215, 245, 109, 0.065);
+}
+
+.live-alias-presets button small {
+  color: #d29a68;
+  font-family: var(--mono);
+  font-size: 7px;
+}
+
+.live-alias-presets button strong {
+  overflow: hidden;
+  color: var(--lime);
+  font-family: var(--mono);
+  font-size: 7px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-alias-console.is-step {
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  align-items: center;
+}
+
+.live-alias-console.is-step > div {
+  display: grid;
+  gap: 4px;
+}
+
+.live-alias-console.is-step span {
+  color: #7b9991;
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: 0.1em;
+}
+
+.live-alias-console.is-step strong {
+  color: var(--lime);
+  font-size: 11px;
+}
+
+.live-alias-console.is-step p {
+  margin: 0;
+  color: #78958e;
+  font-size: 8px;
+  line-height: 1.6;
+}
+
+.simulator-screen.is-workbench.is-echarts-scope {
+  padding: 13px 16px 17px;
+}
+
+.scope-chart-guidance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 6px;
+  padding: 7px 10px;
+  border: 1px solid rgba(215, 245, 109, 0.09);
+  border-radius: 8px;
+  background: rgba(215, 245, 109, 0.035);
+}
+
+.scope-chart-guidance span {
+  color: #b4c8c1;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.scope-chart-guidance small {
+  color: #68877f;
+  font-size: 7px;
+  text-align: right;
+}
+
+.echart-analysis-frame {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(10, 163, 154, 0.12);
+  border-radius: 13px;
+  background:
+    radial-gradient(circle at 74% 14%, rgba(10, 163, 154, 0.065), transparent 18rem),
+    #041d1e;
+  box-shadow: inset 0 0 34px rgba(0, 0, 0, 0.12);
+}
+
+.time-analysis-chart {
+  height: 440px;
+}
+
+.frequency-analysis-chart {
+  height: 410px;
+  border: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 70% 20%, rgba(10, 163, 154, 0.06), transparent 22rem),
+    #041d1e;
+}
+
+.echart-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+}
+
+.echart-loading-state {
+  display: flex;
+  min-height: 360px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #809c95;
+  background: #041d1e;
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.echart-tooltip {
+  min-width: 178px;
+  overflow: hidden;
+  color: #dce7e2;
+  border: 1px solid rgba(215, 245, 109, 0.18);
+  border-radius: 10px;
+  background: rgba(3, 25, 26, 0.96);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(10px);
+}
+
+.echart-tooltip header {
+  padding: 8px 10px;
+  color: var(--lime);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.echart-tooltip-row {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 8px;
+}
+
+.echart-tooltip-row i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.echart-tooltip-row span {
+  color: #91aaa3;
+}
+
+.echart-tooltip-row strong {
+  color: #e5eee9;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.echart-scan-playhead {
+  position: absolute;
+  z-index: 12;
+  top: 62px;
+  bottom: 66px;
+  left: 62px;
+  width: 1px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, var(--lime) 18%, var(--lime) 82%, transparent);
+  box-shadow: 0 0 14px rgba(215, 245, 109, 0.72);
+  animation: echart-scan 4.8s linear infinite;
+}
+
+.echart-scan-playhead::before {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  content: '';
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--lime);
+  box-shadow: 0 0 12px var(--lime);
+}
+
+.echart-scan-playhead.is-paused {
+  animation-play-state: paused;
+}
+
+@keyframes echart-scan {
+  from { left: 62px; }
+  to { left: calc(100% - 28px); }
+}
+
+.simulator-analysis-panel > .frequency-analysis-chart {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+@container (max-width: 720px) {
+  .live-alias-presets {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .live-alias-presets > span {
+    grid-column: 1 / -1;
+  }
+
+  .time-analysis-chart {
+    height: 420px;
+  }
+
+  .frequency-analysis-chart {
+    height: 400px;
+  }
+}
+
+@media (max-width: 620px) {
+  .live-alias-console {
+    padding: 12px 10px;
+  }
+
+  .live-alias-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .live-alias-flow > b {
+    min-height: 54px;
+  }
+
+  .live-alias-flow > b::before,
+  .live-alias-flow > b::after {
+    display: none;
+  }
+
+  .live-alias-console.is-step {
+    grid-template-columns: 1fr;
+  }
+
+  .scope-chart-guidance {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .scope-chart-guidance small {
+    text-align: left;
+  }
+
+  .simulator-screen.is-workbench.is-echarts-scope {
+    padding: 11px 8px 14px;
+  }
+
+  .time-analysis-chart,
+  .frequency-analysis-chart {
+    height: 390px;
+    border-radius: 10px;
+  }
+
+  .echart-loading-state {
+    min-height: 340px;
+  }
+}
