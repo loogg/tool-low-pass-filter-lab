@@ -1,169 +1,57 @@
-import { CircleCheckBig, CircleX, Gauge, MoveRight, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { ArrowRight, Check, CircleCheck, CircleX, RotateCcw } from 'lucide-react'
+import { Metrics, Notice, NumberField } from './LabUI.jsx'
 import { clamp, solveDesignConstraints } from '../lib/filterMath.js'
-import {
-  formatFrequency,
-  formatNumber,
-  formatPercent,
-  formatSeconds,
-} from '../lib/format.js'
-import SectionIntro from './SectionIntro.jsx'
+import { formatFrequency, formatPercent, formatSeconds } from '../lib/format.js'
 
-function ConstraintInput({ label, symbol, value, onChange, suffix, min, max, step, hint }) {
-  function commit(nextValue) {
-    if (!Number.isFinite(nextValue)) return
-    onChange(clamp(nextValue, min, max))
-  }
-
-  return (
-    <label className="constraint-input">
-      <span><strong>{label}</strong><code>{symbol}</code></span>
-      <div><input type="number" value={value} min={min} max={max} step={step} onChange={(event) => commit(Number(event.target.value))} /><em>{suffix}</em></div>
-      <small>{hint}</small>
-    </label>
-  )
-}
-
+const EXAMPLE = { settlingSeconds: 1, passFrequencyHz: 1, passPercent: 90, stopFrequencyHz: 10, stopPercent: 30 }
 const ISSUE_COPY = {
-  'settling-faster-than-sample': '目标响应时间不能短于一个采样周期',
-  'passband-outside-baseband': '最高有效频率必须严格低于 Nyquist 频率',
-  'stopband-outside-baseband': '数字阻带频率必须严格低于 Nyquist 频率；更高频率要在 ADC 前处理',
-  'passband-not-below-stopband': '最高有效频率必须低于主要干扰频率',
+  'settling-faster-than-sample': '响应预算至少需要一个采样周期。',
+  'passband-outside-baseband': '通带频率必须严格低于 fs/2。',
+  'stopband-outside-baseband': '数字阻带频率必须严格低于 fs/2；更高频率要在 ADC 前处理。',
+  'passband-not-below-stopband': '通带频率必须低于阻带频率。',
 }
+const bound = (value) => Number.isFinite(value) && value > 0 ? formatFrequency(value) : '不可满足'
 
-function formatConstraintBound(value) {
-  return Number.isFinite(value) && value > 0 ? formatFrequency(value) : '不可满足'
-}
-
-export default function DesignAssistant({ sampleRateHz, method, onApplyCutoff }) {
-  const [settlingSeconds, setSettlingSeconds] = useState(1)
-  const [passFrequencyHz, setPassFrequencyHz] = useState(1)
-  const [passPercent, setPassPercent] = useState(90)
-  const [stopFrequencyHz, setStopFrequencyHz] = useState(10)
-  const [stopPercent, setStopPercent] = useState(30)
-
-  const result = useMemo(
-    () =>
-      solveDesignConstraints({
-        settlingSeconds,
-        passFrequencyHz,
-        passMagnitude: passPercent / 100,
-        stopFrequencyHz,
-        stopMagnitude: stopPercent / 100,
-        sampleRateHz,
-        method,
-      }),
-    [settlingSeconds, passFrequencyHz, passPercent, stopFrequencyHz, stopPercent, sampleRateHz, method],
-  )
-
-  const values = [result.timeLower, result.passLower, result.stopUpper]
-    .filter((value) => Number.isFinite(value) && value > 0)
-  const scaleMinimum = Math.min(...values) / 1.8
-  const scaleMaximum = Math.max(...values) * 1.8
-  const logMinimum = Math.log10(scaleMinimum)
-  const logSpan = Math.max(0.001, Math.log10(scaleMaximum) - logMinimum)
-  const position = (value) => {
-    if (!Number.isFinite(value)) return '100%'
-    if (value <= 0) return '0%'
-    return `${clamp(((Math.log10(value) - logMinimum) / logSpan) * 100, 0, 100)}%`
-  }
-  const methodLabel = method === 'zoh' ? 'ZOH 精确映射' : '后向欧拉'
-  const issueSummary = result.issues.map((issue) => ISSUE_COPY[issue]).filter(Boolean).join('；')
-
-  return (
-    <section className="content-section">
-      <SectionIntro
-        eyebrow="04 · 工程选型"
-        title="用最终数字递推求交集，不拿模拟近似代替验证"
-        description="响应速度和有效信号给出 fc 下限，干扰抑制给出 fc 上限。全部约束都按当前 α 映射后的真实数字幅频与离散包络求解。"
-        aside={<><Gauge size={18} />{methodLabel} · fs {formatFrequency(sampleRateHz)}</>}
-      />
-
-      <div className="designer-layout">
-        <div className="constraint-panel">
-          <div className="constraint-heading">
-            <div><span>输入目标</span><h3>告诉我你想保留什么、压掉什么</h3></div>
-            <button
-              type="button"
-              onClick={() => {
-                setSettlingSeconds(1)
-                setPassFrequencyHz(1)
-                setPassPercent(90)
-                setStopFrequencyHz(10)
-                setStopPercent(30)
-              }}
-            >
-              恢复示例
-            </button>
-          </div>
-
-          <div className="constraint-input-grid">
-            <ConstraintInput label="95% 响应时间" symbol="t95" value={settlingSeconds} onChange={setSettlingSeconds} suffix="s" min={0.01} max={60} step={0.1} hint="希望多快基本跟上" />
-            <ConstraintInput label="最高有效频率" symbol="fp" value={passFrequencyHz} onChange={setPassFrequencyHz} suffix="Hz" min={0.01} max={1000} step={0.1} hint="有用信号的频率边界" />
-            <ConstraintInput label="有效信号至少保留" symbol="Gp" value={passPercent} onChange={setPassPercent} suffix="%" min={1} max={99.9} step={1} hint="越高越重视保真" />
-            <ConstraintInput label="主要干扰频率" symbol="fstop" value={stopFrequencyHz} onChange={setStopFrequencyHz} suffix="Hz" min={0.01} max={5000} step={0.1} hint="希望被压制的频率" />
-            <ConstraintInput label="干扰最多剩余" symbol="Gs" value={stopPercent} onChange={setStopPercent} suffix="%" min={0.1} max={99} step={1} hint="越低表示抑制越强" />
-          </div>
-        </div>
-
-        <article className={`solution-card ${result.feasible ? 'is-feasible' : 'is-infeasible'}`}>
-          <div className="solution-status">
-            {result.feasible ? <CircleCheckBig size={26} /> : <CircleX size={26} />}
-            <div>
-              <span>{result.feasible ? '当前数字一阶低通可以满足' : '这些要求没有有效交集'}</span>
-              <h3>{result.feasible
-                ? `${formatFrequency(result.lower)} ～ ${formatFrequency(result.upper)}`
-                : issueSummary || '下限已经高于上限'}</h3>
-            </div>
-          </div>
-
-          <div className="constraint-results">
-            <div><span>数字 t95 下限</span><strong>fc ≥ {formatConstraintBound(result.timeLower)}</strong></div>
-            <div><span>数字通带下限</span><strong>fc ≥ {formatConstraintBound(result.passLower)}</strong></div>
-            <div><span>数字阻带上限</span><strong>fc ≤ {formatConstraintBound(result.stopUpper)}</strong></div>
-            <div><span>数字基带边界</span><strong>fp、fstop &lt; {formatFrequency(result.nyquistFrequency)}</strong></div>
-          </div>
-
-          {result.issues.length === 0 ? (
-            <div className="range-visual" aria-label="截止频率约束范围图">
-              <div className="range-track">
-                {result.feasible ? (
-                  <span className="feasible-band" style={{ left: position(result.lower), right: `calc(100% - ${position(result.upper)})` }} />
-                ) : (
-                  <span className="conflict-band" style={{ left: position(result.upper), right: `calc(100% - ${position(result.lower)})` }} />
-                )}
-                <i className="range-marker time" style={{ left: position(result.timeLower) }}><b>时间</b></i>
-                <i className="range-marker pass" style={{ left: position(result.passLower) }}><b>通带</b></i>
-                <i className="range-marker stop" style={{ left: position(result.stopUpper) }}><b>阻带</b></i>
-              </div>
-              <div className="range-labels"><span>{formatFrequency(scaleMinimum)}</span><span>fc 对数刻度</span><span>{formatFrequency(scaleMaximum)}</span></div>
-            </div>
-          ) : null}
-
-          {result.feasible ? (
-            <div className="suggestion-box">
-              <Sparkles size={20} />
-              <div>
-                <span>建议从可行区间的几何中点开始</span>
-                <strong>fc = {formatFrequency(result.suggested)}</strong>
-                <small>
-                  实算：t95 {formatSeconds(result.verification.settlingSeconds)} · 通带 {formatPercent(result.verification.passMagnitude, 2)} · 阻带 {formatPercent(result.verification.stopMagnitude, 2)}
-                </small>
-              </div>
-              <button type="button" onClick={() => onApplyCutoff(result.suggested)}>采用建议值 <MoveRight size={17} /></button>
-            </div>
-          ) : (
-            <div className="suggestion-box warning">
-              <CircleX size={20} />
-              <div>
-                <span>{result.issues.length ? '先修正采样边界或目标频率' : '继续调 τ / fc 也无法同时满足'}</span>
-                <strong>{result.issues.length ? issueSummary : '放宽指标，或考虑二阶 / 更高阶滤波器'}</strong>
-              </div>
-            </div>
-          )}
-        </article>
+export default function DesignAssistant({ cutoffHz, sampleRateHz, method, onApplyCutoff }) {
+  const [goals, setGoals] = useState(EXAMPLE)
+  const [appliedKey, setAppliedKey] = useState('')
+  const result = useMemo(() => solveDesignConstraints({ ...goals, passMagnitude: goals.passPercent / 100, stopMagnitude: goals.stopPercent / 100, sampleRateHz, method }), [goals, sampleRateHz, method])
+  const resultKey = `${sampleRateHz}-${method}-${result.suggested}`
+  const applied = appliedKey === resultKey && cutoffHz === result.suggested
+  const field = (key, label, min, max, unit, hint) => <NumberField label={label} value={goals[key]} min={min} max={max} unit={unit} hint={hint} onChange={(value) => setGoals((previous) => ({ ...previous, [key]: value }))} />
+  const values = [result.timeLower, result.passLower, result.stopUpper].filter((v) => Number.isFinite(v) && v > 0)
+  const low = values.length ? Math.min(...values) / 1.8 : 0.001
+  const high = values.length ? Math.max(...values) * 1.8 : 1
+  const position = (value) => clamp((Math.log(value / low) / Math.log(high / low)) * 100, 0, 100)
+  return <div className="result-stack">
+    <article className="panel design-goals">
+      <header className="panel-title"><h2>目标约束</h2><button type="button" className="text-button" onClick={() => { setGoals(EXAMPLE); setAppliedKey('') }}><RotateCcw size={14} />恢复示例</button></header>
+      <div className="goal-grid">
+        <div className="goal-group"><span className="goal-number">01</span><h3>响应速度</h3>{field('settlingSeconds', '达到 95% 的更新预算', 1e-9, 1_000_000, 's', '按整数次更新计算 N·Ts')}</div>
+        <div className="goal-group"><span className="goal-number">02</span><h3>通带指标</h3>{field('passFrequencyHz', '通带频率', 0.001, 200_000_000, 'Hz')}{field('passPercent', '至少保留幅值', 0.1, 99.99, '%')}</div>
+        <div className="goal-group"><span className="goal-number">03</span><h3>阻带指标</h3>{field('stopFrequencyHz', '阻带频率', 0.001, 200_000_000, 'Hz')}{field('stopPercent', '最多剩余幅值', 0.01, 99.99, '%')}</div>
       </div>
-      <p className="formula-footnote">当前使用 {methodLabel} 的数字传递函数逐项反求边界；下限取 max({formatNumber(result.timeLower, 3)}, {formatNumber(result.passLower, 3)}) Hz。Nyquist 边界必须严格留在有效信号与数字阻带之外，更高频率的能量仍要在 ADC 前抑制。</p>
-    </section>
-  )
+    </article>
+    <article className={`panel solution-panel ${result.feasible ? 'is-feasible' : ''}`} aria-live="polite">
+      <header className="solution-heading">{result.feasible ? <CircleCheck size={24} /> : <CircleX size={24} />}<div><p className="eyebrow">{result.feasible ? '有可行解' : '无可行解'}</p><h2>{result.feasible ? '可行截止参数区间' : '约束无交集'}</h2></div></header>
+      {result.feasible ? <div className="solution-range">{formatFrequency(result.lower)}<span>至</span>{formatFrequency(result.upper)}</div> : <p className="solution-explanation">{result.issues.length ? result.issues.map((issue) => ISSUE_COPY[issue]).join(' ') : '响应与保真要求的下限，已经高于干扰抑制允许的上限。放宽目标或提高滤波阶数后再试。'}</p>}
+      <div className="constraint-bounds">
+        <div><span>响应速度</span><strong>fc ≥ {bound(result.timeLower)}</strong></div>
+        <div><span>通带保留</span><strong>fc ≥ {bound(result.passLower)}</strong></div>
+        <div><span>阻带抑制</span><strong>fc ≤ {bound(result.stopUpper)}</strong></div>
+      </div>
+      {result.issues.length === 0 && values.length === 3 ? <div className="constraint-visual" role="img" aria-label={result.feasible ? '三个约束存在截止参数交集' : '截止参数下限和上限冲突'}>
+        {[['响应', result.timeLower, false], ['通带', result.passLower, false], ['阻带', result.stopUpper, true]].map(([label, value, upper]) => <div key={label}><span>{label}</span><div className="constraint-track"><i style={upper ? { left: 0, width: `${position(value)}%` } : { left: `${position(value)}%`, right: 0 }} /></div></div>)}
+        <p><span>{formatFrequency(low)}</span><span>fc · 对数刻度</span><span>{formatFrequency(high)}</span></p>
+      </div> : null}
+      {result.feasible ? <div className="suggestion"><div><span>建议截止参数（几何中点）</span><strong>{formatFrequency(result.suggested)}</strong></div><button type="button" className="button button-blue" onClick={() => { onApplyCutoff(result.suggested); setAppliedKey(resultKey) }}>{applied ? '已应用到共享参数' : '采用建议值'}{applied ? <Check size={16} /> : <ArrowRight size={16} />}</button></div> : null}
+    </article>
+    {result.verification ? <Metrics items={[
+      { label: '回代 · 95% 更新预算', value: formatSeconds(result.verification.settlingSeconds), detail: `目标 ≤ ${formatSeconds(goals.settlingSeconds)}` },
+      { label: '回代 · 通带幅值', value: formatPercent(result.verification.passMagnitude, 2), detail: `目标 ≥ ${goals.passPercent}%` },
+      { label: '回代 · 阻带幅值', value: formatPercent(result.verification.stopMagnitude, 2), detail: `目标 ≤ ${goals.stopPercent}%` },
+    ]} /> : null}
+    <Notice>按当前{method === 'zoh' ? '极点匹配' : '后向欧拉'}的 H(z) 求解，fs = {formatFrequency(sampleRateHz)}。这里的 fc 是系数映射参数；实际数字截止由传递函数另行计算。更新预算从初始状态 y[−1] 计 N·Ts。</Notice>
+  </div>
 }

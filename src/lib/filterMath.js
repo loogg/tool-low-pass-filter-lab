@@ -39,8 +39,8 @@ export function aliasingInfo(frequencyHz, sampleRateHz) {
   const alias = remainder <= nyquist ? remainder : sampleRate - remainder
   const nyquistZone = Math.max(1, Math.ceil(inputFrequency / nyquist))
   const mirrored = nyquistZone % 2 === 0
-  const tolerance = Math.max(EPSILON, sampleRate * 1e-12)
-  const aliasFrequency = Math.abs(alias) <= tolerance ? 0 : alias
+  const tolerance = Number.EPSILON * sampleRate * 8
+  const aliasFrequency = alias
   const atNyquist = Math.abs(aliasFrequency - nyquist) <= tolerance
   const aliased = inputFrequency > nyquist + tolerance
 
@@ -68,6 +68,8 @@ export function cutoffFromTau(tauSeconds) {
 }
 
 export function alphaZoh(cutoffHz, sampleRateHz) {
+  // Matched-pole coefficient. The app uses x[n] immediately; strict ZOH
+  // sampling of the analog plant instead uses x[n-1] (one extra z^-1).
   const cutoff = positive(cutoffHz)
   const sampleRate = positive(sampleRateHz)
   return clamp(-Math.expm1((-TWO_PI * cutoff) / sampleRate), 0, 1)
@@ -92,7 +94,7 @@ export function magnitudeAt(frequencyHz, cutoffHz) {
 }
 
 export function gainDbAt(frequencyHz, cutoffHz) {
-  return 20 * Math.log10(Math.max(magnitudeAt(frequencyHz, cutoffHz), EPSILON))
+  return 20 * Math.log10(Math.max(magnitudeAt(frequencyHz, cutoffHz), Number.MIN_VALUE))
 }
 
 export function phaseDegreesAt(frequencyHz, cutoffHz) {
@@ -115,7 +117,7 @@ export function discreteMagnitudeAt(frequencyHz, cutoffHz, sampleRateHz, method 
 export function discreteGainDbAt(frequencyHz, cutoffHz, sampleRateHz, method = 'zoh') {
   return 20 * Math.log10(Math.max(
     discreteMagnitudeAt(frequencyHz, cutoffHz, sampleRateHz, method),
-    EPSILON,
+    Number.MIN_VALUE,
   ))
 }
 
@@ -123,7 +125,10 @@ export function discretePhaseDegreesAt(frequencyHz, cutoffHz, sampleRateHz, meth
   const sampleRate = positive(sampleRateHz)
   const alpha = alphaForMethod(cutoffHz, sampleRate, method)
   const pole = 1 - alpha
-  const omega = (TWO_PI * aliasFrequency(frequencyHz, sampleRate)) / sampleRate
+  const remainder = frequencyHz % sampleRate
+  const signedFrequency = remainder > sampleRate / 2 ? remainder - sampleRate
+    : remainder < -sampleRate / 2 ? remainder + sampleRate : remainder
+  const omega = (TWO_PI * signedFrequency) / sampleRate
   const halfAngleSine = Math.sin(omega / 2)
   const phase = -Math.atan2(
     pole * Math.sin(omega),
@@ -147,7 +152,7 @@ export function discreteGroupDelaySecondsAt(
   const oneMinusCosine = 2 * halfAngleSine * halfAngleSine
   const denominator = alpha * alpha + 2 * pole * oneMinusCosine
 
-  if (denominator <= Number.EPSILON) return 0
+  if (denominator === 0) return 0
 
   const delaySamples = (pole * (alpha - oneMinusCosine)) / denominator
   return delaySamples / sampleRate
@@ -167,15 +172,33 @@ export function discreteSettlingTime(
   method = 'zoh',
   fraction = 0.95,
 ) {
-  const safeFraction = clamp(fraction, EPSILON, 1 - EPSILON)
-  return -discreteTimeConstantSeconds(cutoffHz, sampleRateHz, method) * Math.log(1 - safeFraction)
+  return discreteSettlingSamples(cutoffHz, sampleRateHz, method, fraction) / positive(sampleRateHz)
+}
+
+// N updates, counted from y[-1]. For a unit step x[0]=1 the first attained
+// sample is y[N-1], timestamp (N-1)Ts. N*Ts is the update budget convention.
+export function discreteSettlingSamples(cutoffHz, sampleRateHz, method = 'zoh', fraction = 0.95) {
+  const alpha = alphaForMethod(cutoffHz, sampleRateHz, method)
+  if (alpha >= 1) return 1
+  const updates = Math.log1p(-clamp(fraction, EPSILON, 1 - EPSILON)) / Math.log1p(-alpha)
+  return Math.max(1, Math.ceil(updates - Number.EPSILON * 4 * Math.max(1, updates)))
+}
+
+export function digitalCutoffFrequency(cutoffHz, sampleRateHz, method = 'zoh') {
+  const alpha = alphaForMethod(cutoffHz, sampleRateHz, method)
+  const pole = 1 - alpha
+  if (pole <= 0) return null
+  // Half-angle form avoids cancellation when alpha is very small.
+  const sine = alpha / (2 * Math.sqrt(pole))
+  if (sine > 1 + 1e-14) return null
+  return positive(sampleRateHz) * Math.asin(Math.min(1, sine)) / Math.PI
 }
 
 export function digitalMappingDiagnostics(cutoffHz, sampleRateHz, method = 'zoh') {
   const cutoff = positive(cutoffHz)
   const sampleRate = positive(sampleRateHz)
   const nyquist = sampleRate / 2
-  const tolerance = Math.max(EPSILON, sampleRate * 1e-12)
+  const tolerance = Number.EPSILON * sampleRate * 8
   const cutoffInBaseband = cutoff < nyquist - tolerance
 
   if (!cutoffInBaseband) {
@@ -310,14 +333,17 @@ function cutoffForDiscreteSettlingTime(
   sampleRateHz,
   method,
 ) {
-  const maximumTime = positive(timeSeconds)
+  const rawBudget = positive(timeSeconds) * positive(sampleRateHz)
+  const updateBudget = Math.floor(rawBudget + Number.EPSILON * 4 * Math.max(1, rawBudget))
+  if (updateBudget < 1) return Number.POSITIVE_INFINITY
+  const maximumTime = updateBudget / positive(sampleRateHz)
   return findLogCutoffThreshold(
     (cutoffHz) => discreteSettlingTime(
       cutoffHz,
       sampleRateHz,
       method,
       fraction,
-    ) <= maximumTime,
+    ) <= maximumTime + Number.EPSILON * Math.max(1, maximumTime),
   )
 }
 
@@ -333,7 +359,7 @@ export function solveDesignConstraints({
 }) {
   const sampleRate = positive(sampleRateHz)
   const nyquist = sampleRate / 2
-  const tolerance = Math.max(EPSILON, sampleRate * 1e-12)
+  const tolerance = Number.EPSILON * sampleRate * 8
   const passFrequencyValid = Number.isFinite(passFrequencyHz)
     && passFrequencyHz > 0
     && passFrequencyHz < nyquist - tolerance
@@ -464,20 +490,20 @@ function inputSample({
 
   if (type === 'step') {
     baseSample = time >= duration * stepTimeRatio ? stepFinalValue : stepInitialValue
-    referenceAmplitude = Math.max(Math.abs(stepFinalValue - stepInitialValue), EPSILON)
+    referenceAmplitude = Math.abs(stepFinalValue - stepInitialValue)
   } else if (type === 'square') {
     const rawCyclePosition = signalFrequency * time + signalPhaseDegrees / 360
     const cyclePosition = ((rawCyclePosition % 1) + 1) % 1
     baseSample = signalOffset + (
       cyclePosition < squareDutyCycle ? signalAmplitude : -signalAmplitude
     )
-    referenceAmplitude = Math.max(signalAmplitude, EPSILON)
+    referenceAmplitude = signalAmplitude
   } else {
     const phaseRadians = (signalPhaseDegrees * Math.PI) / 180
     baseSample = signalOffset + (
       Math.sin(TWO_PI * signalFrequency * time + phaseRadians) * signalAmplitude
     )
-    referenceAmplitude = Math.max(signalAmplitude, EPSILON)
+    referenceAmplitude = signalAmplitude
   }
 
   const noise = deterministicNoise(index, noiseSeed) * referenceAmplitude * noiseLevel
@@ -553,33 +579,28 @@ export function createSimulation({
   const naturalDuration = inputType === 'step'
     ? 6 * tauFromCutoff(cutoff)
     : visibleCycles / visibleSignalFrequency
-  const duration = durationSeconds === undefined
+  const requestedDuration = durationSeconds === undefined
     ? clamp(Math.max(naturalDuration, minimumDuration), minimumDuration, 1_000_000)
-    : clamp(positive(durationSeconds), minimumDuration, 1_000_000)
-  const sampleCount = Math.max(
+    : clamp(positive(durationSeconds), 1 / sampleRate, 1_000_000)
+  const requestedSampleCount = Math.max(
     2,
-    Math.ceil(Math.min(duration * sampleRate, Number.MAX_SAFE_INTEGER - 1)) + 1,
+    Math.floor(Math.min(requestedDuration * sampleRate + 1e-8, Number.MAX_SAFE_INTEGER - 1)) + 1,
   )
   const alpha = alphaForMethod(cutoff, sampleRate, method)
-  const integrationLimit = Math.max(32, Math.round(maxIntegrationSteps))
-  const integrationStride = Math.max(1, Math.ceil(sampleCount / integrationLimit))
-  const simulatedSteps = Math.ceil(sampleCount / integrationStride)
-  const renderStride = Math.max(1, Math.ceil(simulatedSteps / maxRenderedPoints))
-  const input = []
-  const output = []
+  const integrationLimit = Math.round(clamp(maxIntegrationSteps, 32, 200_000))
+  const sampleCount = Math.min(requestedSampleCount, integrationLimit)
+  const duration = (sampleCount - 1) / sampleRate
+  const fullInput = []
+  const fullOutput = []
   let filtered = initialState
   let inputEnergy = 0
   let outputEnergy = 0
-  let simulatedIndex = 0
-
-  for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += integrationStride) {
-    const blockSize = Math.min(integrationStride, sampleCount - sampleIndex)
-    const endSampleIndex = sampleIndex + blockSize - 1
-    const time = Math.min(endSampleIndex / sampleRate, duration)
+  for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
+    const time = sampleIndex / sampleRate
     const sample = inputSample({
       type: inputType,
       time,
-      duration,
+      duration: requestedDuration,
       signalFrequency,
       signalAmplitude: amplitude,
       signalOffset: offset,
@@ -593,19 +614,41 @@ export function createSimulation({
       stepTimeRatio: stepStart,
       stepInitialValue: stepInitial,
       stepFinalValue: stepFinal,
-      index: simulatedIndex,
+      index: sampleIndex,
     })
-    const blockAlpha = 1 - (1 - alpha) ** blockSize
-    filtered += blockAlpha * (sample - filtered)
-    inputEnergy += sample * sample * blockSize
-    outputEnergy += filtered * filtered * blockSize
-
-    if (simulatedIndex % renderStride === 0 || endSampleIndex === sampleCount - 1) {
-      input.push({ x: time, y: sample })
-      output.push({ x: time, y: filtered })
-    }
-    simulatedIndex += 1
+    filtered += alpha * (sample - filtered)
+    inputEnergy += sample * sample
+    outputEnergy += filtered * filtered
+    fullInput.push({ x: time, y: sample })
+    fullOutput.push({ x: time, y: filtered })
   }
+
+  // Only drawing is reduced. Select the extrema of both series per bucket;
+  // keep real sample times and never feed this selection back into recursion.
+  const pointBudget = Math.round(clamp(maxRenderedPoints, 32, 4_800))
+  const selected = new Set([0, sampleCount - 1])
+  if (sampleCount <= pointBudget) {
+    for (let index = 0; index < sampleCount; index += 1) selected.add(index)
+  } else {
+    const bucketCount = Math.max(1, Math.floor((pointBudget - 2) / 4))
+    for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+      const start = Math.floor(bucket * sampleCount / bucketCount)
+      const end = Math.floor((bucket + 1) * sampleCount / bucketCount)
+      for (const series of [fullInput, fullOutput]) {
+        let minimum = start
+        let maximum = start
+        for (let index = start + 1; index < end; index += 1) {
+          if (series[index].y < series[minimum].y) minimum = index
+          if (series[index].y > series[maximum].y) maximum = index
+        }
+        selected.add(minimum)
+        selected.add(maximum)
+      }
+    }
+  }
+  const indices = [...selected].sort((a, b) => a - b)
+  const input = indices.map((index) => fullInput[index])
+  const output = indices.map((index) => fullOutput[index])
 
   const analogInput = []
   let analogTraceCompressed = false
@@ -617,7 +660,7 @@ export function createSimulation({
     const analogPointBudget = Math.round(clamp(maxRenderedPoints * 6, 720, 4_800))
     const desiredAnalogPoints = Math.ceil(duration * highestAnalogFrequency * 12) + 1
     analogTraceCompressed = desiredAnalogPoints > analogPointBudget
-    const analogPointCount = Math.round(clamp(
+    const analogPointCount = analogTraceCompressed ? 0 : Math.round(clamp(
       desiredAnalogPoints,
       Math.min(240, analogPointBudget),
       analogPointBudget,
@@ -630,7 +673,7 @@ export function createSimulation({
         y: inputSample({
           type: inputType,
           time,
-          duration,
+          duration: requestedDuration,
           signalFrequency,
           signalAmplitude: amplitude,
           signalOffset: offset,
@@ -651,14 +694,17 @@ export function createSimulation({
   }
 
   const aliasReference = []
+  let aliasTraceCompressed = false
   const aliasReferencePhaseDegrees = signalAliasing.mirrored
     ? 180 - signalPhase
     : signalPhase
   if (inputType === 'sine') {
     const aliasPointBudget = Math.round(clamp(maxRenderedPoints * 3, 360, 2_400))
     const visibleAliasCycles = duration * Math.max(signalAliasing.aliasFrequency, 1 / duration)
-    const aliasPointCount = Math.round(clamp(
-      Math.ceil(visibleAliasCycles * 24) + 1,
+    const desiredAliasPoints = Math.ceil(visibleAliasCycles * 24) + 1
+    aliasTraceCompressed = desiredAliasPoints > aliasPointBudget
+    const aliasPointCount = aliasTraceCompressed ? 0 : Math.round(clamp(
+      desiredAliasPoints,
       Math.min(240, aliasPointBudget),
       aliasPointBudget,
     ))
@@ -679,10 +725,13 @@ export function createSimulation({
     analogInput,
     analogTraceCompressed,
     aliasReference,
+    aliasTraceCompressed,
     aliasReferencePhaseDegrees,
     input,
     output,
     duration,
+    requestedDuration,
+    minimumWindowExtended: durationSeconds !== undefined && durationSeconds < 1 / sampleRate,
     alpha,
     signalFrequency,
     signalAliasFrequency: signalAliasing.aliasFrequency,
@@ -691,10 +740,13 @@ export function createSimulation({
     interferenceAliasFrequency: interferenceAliasing.aliasFrequency,
     interferenceAliasing,
     sampleCount,
-    simulatedSteps,
-    integrationStride,
+    requestedSampleCount,
+    simulatedSteps: sampleCount,
+    integrationStride: 1,
     renderedPoints: input.length,
-    approximated: integrationStride > 1,
+    approximated: false,
+    truncated: requestedSampleCount > sampleCount,
+    decimated: sampleCount > input.length,
     inputRms: Math.sqrt(inputEnergy / sampleCount),
     outputRms: Math.sqrt(outputEnergy / sampleCount),
   }

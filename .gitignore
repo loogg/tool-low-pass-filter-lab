@@ -6,3 +6,4 @@ output
 *.log
 .env*
 !.env.example
+/temp/

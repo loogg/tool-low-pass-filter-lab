@@ -9,6 +9,8 @@ import {
   cutoffFromTau,
   digitalMappingDiagnostics,
   discreteMagnitudeAt,
+  digitalCutoffFrequency,
+  discreteSettlingSamples,
   discreteGroupDelaySecondsAt,
   discretePhaseDegreesAt,
   discreteSettlingTime,
@@ -44,6 +46,31 @@ describe('first-order low-pass relationships', () => {
   it('calculates both discrete coefficients', () => {
     expect(alphaZoh(2.5, 100)).toBeCloseTo(0.14536, 4)
     expect(alphaBackwardEuler(2.5, 100)).toBeCloseTo(0.13576, 4)
+  })
+
+  it('finds the actual digital half-power frequency, including absent and tiny corners', () => {
+    for (const method of ['zoh', 'backward-euler']) {
+      const corner = digitalCutoffFrequency(10, 100, method)
+      expect(corner).toBeGreaterThan(0)
+      expect(corner).toBeLessThan(50)
+      expect(discreteMagnitudeAt(corner, 10, 100, method)).toBeCloseTo(Math.SQRT1_2, 12)
+    }
+    expect(digitalCutoffFrequency(1000, 100)).toBeNull()
+    expect(digitalCutoffFrequency(0.001, 200_000_000)).toBeCloseTo(0.001, 12)
+    expect(gainDbAt(100_000_000, 0.001)).toBeCloseTo(-220, 10)
+    expect(discretePhaseDegreesAt(0.001, 0.001, 200_000_000)).toBeCloseTo(-45, 7)
+    expect(discreteGroupDelaySecondsAt(0, 0.001, 200_000_000)).toBeCloseTo(tauFromCutoff(0.001), 5)
+  })
+
+  it('counts the first integer update that actually reaches 95 percent', () => {
+    for (const method of ['zoh', 'backward-euler']) {
+      const alpha = method === 'zoh' ? alphaZoh(2.5, 100) : alphaBackwardEuler(2.5, 100)
+      let output = 0
+      let count = 0
+      while (output < 0.95) { output += alpha * (1 - output); count += 1 }
+      expect(discreteSettlingSamples(2.5, 100, method)).toBe(count)
+    }
+    expect(discreteSettlingTime(1e6, 100)).toBe(0.01)
   })
 
   it('opens the simulator input range across four Nyquist zones', () => {
@@ -85,13 +112,21 @@ describe('first-order low-pass relationships', () => {
     })
   })
 
-  it('shows the same digital response for frequencies that sample to one alias', () => {
+  it('preserves tiny baseband frequencies instead of snapping them to DC at high fs', () => {
+    expect(aliasFrequency(0.00001, 200_000_000)).toBe(0.00001)
+    expect(discreteMagnitudeAt(0.00001, 0.001, 200_000_000)).toBeCloseTo(magnitudeAt(0.00001, 0.001), 10)
+    const count = discreteSettlingSamples(0.001, 200_000_000)
+    const exactCount = Math.ceil(-Math.log(0.05) * 200_000_000 / (2 * Math.PI * 0.001))
+    expect(count).toBe(exactCount)
+  })
+
+  it('keeps magnitude even and phase odd under a mirrored alias', () => {
     expect(discreteMagnitudeAt(600, 40, 1000)).toBeCloseTo(
       discreteMagnitudeAt(400, 40, 1000),
       12,
     )
     expect(discretePhaseDegreesAt(600, 40, 1000)).toBeCloseTo(
-      discretePhaseDegreesAt(400, 40, 1000),
+      -discretePhaseDegreesAt(400, 40, 1000),
       12,
     )
   })
@@ -100,7 +135,8 @@ describe('first-order low-pass relationships', () => {
     expect(discreteGroupDelaySecondsAt(2.5, 2.5, 100, 'zoh')).toBeCloseTo(0.026962, 6)
     expect(discreteTimeConstantSeconds(2.5, 100, 'zoh')).toBeCloseTo(tauFromCutoff(2.5), 12)
     expect(discreteTimeConstantSeconds(2.5, 100, 'backward-euler')).toBeCloseTo(0.0685404, 6)
-    expect(discreteSettlingTime(2.5, 100, 'backward-euler', 0.95)).toBeCloseTo(0.205329, 6)
+    expect(discreteSettlingTime(2.5, 100, 'backward-euler', 0.95)).toBe(0.21)
+    expect(discreteSettlingSamples(2.5, 100, 'backward-euler', 0.95)).toBe(21)
   })
 
   it('reports actual digital mapping error instead of using a fixed fc/fs threshold', () => {
@@ -135,6 +171,15 @@ describe('first-order low-pass relationships', () => {
 })
 
 describe('design constraint solver', () => {
+  it('honors an integer update budget for a fractional sample deadline', () => {
+    const result = solveDesignConstraints({ settlingSeconds: 0.205, passFrequencyHz: 1,
+      passMagnitude: 0.5, stopFrequencyHz: 40, stopMagnitude: 0.99, sampleRateHz: 100,
+      method: 'backward-euler' })
+    expect(result.feasible).toBe(true)
+    expect(discreteSettlingSamples(result.timeLower, 100, 'backward-euler')).toBeLessThanOrEqual(20)
+    expect(result.verification.settlingSeconds).toBeLessThanOrEqual(0.205)
+    expect(discreteSettlingSamples(result.timeLower * 0.999, 100, 'backward-euler')).toBeGreaterThan(20)
+  })
   it('reproduces the feasible range from the teaching example', () => {
     const result = solveDesignConstraints({
       settlingSeconds: 1,
@@ -215,6 +260,56 @@ describe('design constraint solver', () => {
 })
 
 describe('discrete simulation', () => {
+  it('scales relative noise and interference to exact zero for a zero-amplitude source', () => {
+    const result = createSimulation({ cutoffHz: 2.5, sampleRateHz: 100, signalAmplitude: 0,
+      signalOffset: 3, noiseLevel: 3, interferenceLevel: 3, durationSeconds: 0.2 })
+    expect(result.input.every((point) => point.y === 3)).toBe(true)
+    const short = createSimulation({ cutoffHz: 2.5, sampleRateHz: 100, durationSeconds: 0.001 })
+    expect(short.minimumWindowExtended).toBe(true)
+    expect(short.duration).toBe(0.01)
+    expect(short.sampleCount).toBe(2)
+  })
+  it('matches steady sine amplitude and phase to H(z), independently of the chart', () => {
+    for (const method of ['zoh', 'backward-euler']) {
+      const result = createSimulation({ cutoffHz: 10, sampleRateHz: 100, method,
+        signalFrequencyHz: 4, durationSeconds: 10, maxRenderedPoints: 2000 })
+      const steady = result.output.slice(401)
+      const sine = steady.reduce((sum, p) => sum + p.y * Math.sin(2 * Math.PI * 4 * p.x), 0) * 2 / steady.length
+      const cosine = steady.reduce((sum, p) => sum + p.y * Math.cos(2 * Math.PI * 4 * p.x), 0) * 2 / steady.length
+      expect(Math.hypot(sine, cosine)).toBeCloseTo(discreteMagnitudeAt(4, 10, 100, method), 10)
+      expect(Math.atan2(cosine, sine) * 180 / Math.PI).toBeCloseTo(discretePhaseDegreesAt(4, 10, 100, method), 10)
+    }
+  })
+
+  it('never changes exact recursion or RMS when reducing the drawing budget', () => {
+    const options = { cutoffHz: 5, sampleRateHz: 1000, signalFrequencyHz: 6, noiseLevel: 0.3,
+      noiseSeed: 42, durationSeconds: 1, maxIntegrationSteps: 2000 }
+    const full = createSimulation({ ...options, maxRenderedPoints: 2000 })
+    const reduced = createSimulation({ ...options, maxRenderedPoints: 200 })
+    expect(reduced.renderedPoints).toBeLessThanOrEqual(200)
+    expect(reduced.inputRms).toBe(full.inputRms)
+    expect(reduced.outputRms).toBe(full.outputRms)
+    for (const point of reduced.output) expect(point.y).toBe(full.output[Math.round(point.x * 1000)].y)
+  })
+
+  it('uses sample-lattice timestamps and hides undersampled continuous reference curves', () => {
+    const result = createSimulation({ cutoffHz: 10, sampleRateHz: 100, signalFrequencyHz: 60,
+      durationSeconds: 10.005, maxRenderedPoints: 200 })
+    expect(result.duration).toBe(10)
+    expect(result.sampleCount).toBe(1001)
+    expect(result.analogTraceCompressed).toBe(true)
+    expect(result.analogInput).toEqual([])
+    expect(result.aliasTraceCompressed).toBe(true)
+    expect(result.aliasReference).toEqual([])
+  })
+
+  it('keeps the requested step time when a simulation is shortened by its budget', () => {
+    const result = createSimulation({ cutoffHz: 10, sampleRateHz: 1000, inputType: 'step',
+      durationSeconds: 10, stepTimeRatio: 0.5, maxIntegrationSteps: 1000 })
+    expect(result.truncated).toBe(true)
+    expect(result.input.every((p) => p.y === 0)).toBe(true)
+    expect(result.output.every((p) => p.y === 0)).toBe(true)
+  })
   it('converges near one for a step input', () => {
     const result = createSimulation({
       cutoffHz: 2.5,
@@ -302,7 +397,7 @@ describe('discrete simulation', () => {
     }
   })
 
-  it('bounds integration work for MHz sampling while preserving real sample statistics', () => {
+  it('bounds MHz work by reporting a shorter exact simulation window', () => {
     const result = createSimulation({
       cutoffHz: 1_000_000,
       sampleRateHz: 100_000_000,
@@ -312,11 +407,20 @@ describe('discrete simulation', () => {
       maxIntegrationSteps: 2_000,
     })
 
-    expect(result.sampleCount).toBe(400_000_001)
+    expect(result.requestedSampleCount).toBe(400_000_001)
+    expect(result.sampleCount).toBe(2000)
     expect(result.simulatedSteps).toBeLessThanOrEqual(2_000)
     expect(result.renderedPoints).toBeLessThanOrEqual(601)
-    expect(result.integrationStride).toBeGreaterThan(1)
-    expect(result.approximated).toBe(true)
+    expect(result.integrationStride).toBe(1)
+    expect(result.approximated).toBe(false)
+    expect(result.truncated).toBe(true)
+    expect(result.duration).toBe(1999 / 100_000_000)
+    const reference = createSimulation({ cutoffHz: 1_000_000, sampleRateHz: 100_000_000,
+      signalFrequencyHz: 500_000, durationSeconds: result.duration,
+      maxRenderedPoints: 600, maxIntegrationSteps: 2000 })
+    expect(result.output).toEqual(reference.output)
+    expect(result.inputRms).toBe(reference.inputRms)
+    expect(result.outputRms).toBe(reference.outputRms)
   })
 
   it('applies signal offset, phase, and deterministic noise seed', () => {

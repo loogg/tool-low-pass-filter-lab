@@ -1,194 +1,164 @@
-import { Activity, CircleHelp, Gauge, MoveDownRight, Timer } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
+import { RotateCcw } from 'lucide-react'
+import Plot from './Plot.jsx'
+import EngineeringTimeInput from './EngineeringTimeInput.jsx'
+import { Notice, Segments } from './LabUI.jsx'
 import {
-  createFrequencyResponse,
-  createStepResponse,
-  gainDbAt,
-  magnitudeAt,
-  phaseDegreesAt,
-  settlingTime,
-  tauFromCutoff,
+  alphaForMethod, digitalCutoffFrequency, discreteGainDbAt, discreteMagnitudeAt,
+  discretePhaseDegreesAt, discreteSettlingSamples, discreteTimeConstantSeconds,
+  gainDbAt, magnitudeAt, phaseDegreesAt, tauFromCutoff,
 } from '../lib/filterMath.js'
-import { formatNumber, formatPercent, formatSeconds } from '../lib/format.js'
-import LineChart from './LineChart.jsx'
-import SectionIntro from './SectionIntro.jsx'
+import { automaticStepWindow, continuousStepData, continuousStepValue, digitalStepData, digitalStepValue, stepAxis } from '../lib/responseAnalysis.js'
+import { formatFrequency, formatInteger, formatNumber, formatPercent, formatSeconds } from '../lib/format.js'
+import { baseChartOption, chartAxis, chartSeries, CHART_COLORS } from '../lib/chartTheme.js'
 
-function formatTauPosition(value, tau) {
-  if (value <= tau * 0.001) return '0'
-  const ratio = value / tau
-  const roundedRatio = Math.round(ratio)
-  return `${Math.abs(ratio - roundedRatio) < 0.001 ? roundedRatio : formatNumber(ratio, 2)}τ`
-}
+const VIEWS = [{ id: 'step', label: '阶跃响应' }, { id: 'magnitude', label: '幅频响应' }, { id: 'phase', label: '相频响应' }]
+const MODELS = [{ id: 'analog', label: '连续原型' }, { id: 'digital', label: '数字 EMA' }, { id: 'compare', label: '连续 / 数字对比' }]
 
-export default function ResponseLab({ cutoffHz }) {
-  const tau = tauFromCutoff(cutoffHz)
-  const time95 = settlingTime(tau, 0.95)
-  const time99 = settlingTime(tau, 0.99)
-  const stepData = createStepResponse(cutoffHz)
-  const frequencyData = createFrequencyResponse(cutoffHz)
-  const gainSeries = [{
-    label: '增益',
-    color: '#0aa39a',
-    data: frequencyData.map((point) => ({ x: point.x, y: point.gainDb })),
-  }]
-  const phaseSeries = [{
-    label: '相位',
-    color: '#f29a4a',
-    data: frequencyData.map((point) => ({ x: point.x, y: point.phase })),
-  }]
+export default function ResponseLab({ cutoffHz, sampleRateHz, method }) {
+  const [view, setView] = useState('step')
+  const [model, setModel] = useState('analog')
+  const [axisMode, setAxisMode] = useState('physical')
+  const [yMode, setYMode] = useState('amplitude')
+  const [windowMode, setWindowMode] = useState('auto')
+  const [fixedDuration, setFixedDuration] = useState(() => automaticStepWindow(cutoffHz))
+  const [cursor, setCursor] = useState(null)
+  const [resetId, setResetId] = useState(0)
+  const tau = Number(tauFromCutoff(cutoffHz))
+  const autoDuration = automaticStepWindow(cutoffHz)
+  const duration = Number(windowMode === 'auto' ? autoDuration : fixedDuration)
+  const axis = stepAxis(duration, tau, axisMode === 'normalized')
+  const alpha = Number(alphaForMethod(cutoffHz, sampleRateHz, method))
+  const nyquist = sampleRateHz / 2
+  const digitalCutoff = digitalCutoffFrequency(cutoffHz, sampleRateHz, method)
+  const digital = useMemo(() => digitalStepData(cutoffHz, sampleRateHz, method, duration), [cutoffHz, sampleRateHz, method, duration])
+  const showAnalog = model !== 'digital'
+  const showDigital = model !== 'analog'
+  const context = `${view}-${model}-${axisMode}-${yMode}-${duration}-${cutoffHz}-${sampleRateHz}-${method}-${resetId}`
+  const onCursor = useCallback((value) => setCursor((previous) => previous?.context === context && previous.value === value ? previous : { context, value }), [context])
 
-  const frequencyTicks = [cutoffHz / 100, cutoffHz / 10, cutoffHz, cutoffHz * 10, cutoffHz * 100]
-  const magnitudeAnnotations = [
-    {
-      x: cutoffHz,
-      y: gainDbAt(cutoffHz, cutoffHz),
-      label: '≈ 0.707×',
-      detail: '−3 dB',
-      color: '#f29a4a',
-      placement: 'below',
-    },
-    {
-      x: cutoffHz * 10,
-      y: gainDbAt(cutoffHz * 10, cutoffHz),
-      label: '≈ 1/10',
-      detail: '−20 dB',
-      color: '#0a7772',
-      align: 'left',
-    },
-    {
-      x: cutoffHz * 100,
-      y: gainDbAt(cutoffHz * 100, cutoffHz),
-      label: '≈ 1/100',
-      detail: '−40 dB',
-      color: '#0a7772',
-      align: 'left',
-    },
+  function changeWindow(mode) {
+    if (mode === 'fixed' && windowMode === 'auto') setFixedDuration(duration)
+    setWindowMode(mode)
+  }
+
+  function resetChart() {
+    setView('step'); setModel('analog'); setAxisMode('physical'); setYMode('amplitude'); setWindowMode('auto')
+    setCursor(null); setResetId((previous) => previous + 1)
+  }
+
+  const option = useMemo(() => {
+    const base = baseChartOption()
+    const phase = view === 'phase'
+    const timeAxis = stepAxis(duration, tau, axisMode === 'normalized')
+    const series = []
+    if (view === 'step') {
+      const toAxis = (points) => points.map((p) => ({ ...p, x: timeAxis.fromSeconds(p.x) }))
+      if (showAnalog) series.push(chartSeries('连续 y(t)', toAxis(continuousStepData(cutoffHz, duration)), model === 'compare' ? CHART_COLORS.gray : CHART_COLORS.blue, {
+        lineStyle: { color: model === 'compare' ? CHART_COLORS.gray : CHART_COLORS.blue, width: 2.4, type: model === 'compare' ? 'dashed' : 'solid' },
+      }))
+      if (showDigital) series.push(chartSeries('数字 y[n]', toAxis(digital.data), CHART_COLORS.blue, digital.decimated
+        ? { type: 'scatter', symbolSize: 3.5 }
+        : { step: 'end', showSymbol: true, symbolSize: digital.sampleCount < 150 ? 4.5 : 2.5 }))
+      series.push(chartSeries('输入 x = 1', [{ x: 0, y: 1 }, { x: timeAxis.maximum, y: 1 }], '#757575', { lineStyle: { color: '#757575', width: 1.2, type: 'dotted' }, silent: true }))
+      const referenceTimes = showAnalog ? [
+        { value: tau, label: 'τ' }, { value: -tau * Math.log(0.05), label: 't95' }, { value: -tau * Math.log(0.01), label: 't99' },
+      ] : [0.95, 0.99].map((fraction) => ({ value: (discreteSettlingSamples(cutoffHz, sampleRateHz, method, fraction) - 1) / sampleRateHz, label: fraction === 0.95 ? 't95' : 't99' }))
+      series[0].markLine = { silent: true, symbol: 'none', lineStyle: { color: '#aebbcf', type: 'dashed', width: 1 },
+        label: { color: '#646464', fontSize: 11 }, data: referenceTimes.filter((item) => item.value > 0 && item.value <= duration).map((item) => ({ xAxis: timeAxis.fromSeconds(item.value), label: { formatter: item.label } })) }
+      return { ...base,
+        grid: { top: 80, bottom: 64, left: 62, right: 22 },
+        xAxis: chartAxis({ min: 0, max: timeAxis.maximum, interval: timeAxis.interval,
+          name: timeAxis.label, nameLocation: 'middle', nameGap: 34, nameTextStyle: { color: '#646464', fontSize: 12 },
+          axisLabel: { formatter: (v) => formatNumber(v, 4), hideOverlap: true, fontSize: 11 } }),
+        yAxis: chartAxis({ min: 0, max: 1.05, name: yMode === 'percent' ? '归一化输出 (%)' : '幅值（无量纲）', nameGap: 14,
+          nameTextStyle: { color: '#646464', fontSize: 11 },
+          axisPointer: { label: { formatter: ({ value }) => yMode === 'percent' ? formatPercent(Number(value), 2) : formatNumber(Number(value), 4) } },
+          axisLabel: { formatter: (v) => yMode === 'percent' ? formatPercent(v, 0) : formatNumber(v, 2), fontSize: 11 } }),
+        tooltip: { ...base.tooltip, axisPointer: { type: 'cross', snap: false }, formatter: (params) => {
+          const coordinate = Number(params[0]?.axisValue ?? 0)
+          const time = timeAxis.toSeconds(coordinate)
+          const output = (value) => yMode === 'percent' ? formatPercent(value, 3) : formatNumber(value, 6)
+          const n = Math.min(digital.sampleCount - 1, Math.max(0, Math.round(time * sampleRateHz)))
+          return [`t = ${formatSeconds(time)} · t/τ = ${formatNumber(time / tau, 4)}`,
+            ...(showAnalog ? [`连续 y(t): ${output(continuousStepValue(time, cutoffHz))}`] : []),
+            ...(showDigital ? [`数字 y[n]: ${output(digitalStepValue(n, alpha))} · n=${formatInteger(n)} @ ${formatSeconds(n / sampleRateHz)}`] : []),
+            '输入 x = 1',
+          ].join('<br/>')
+        } }, series,
+      }
+    }
+    const minimum = model === 'analog' ? cutoffHz / 100 : Math.min(cutoffHz / 100, nyquist / 1000)
+    const maximum = model === 'analog' ? cutoffHz * 100 : nyquist
+    const frequencies = Array.from({ length: 321 }, (_, index) => minimum * (maximum / minimum) ** (index / 320))
+    if (showAnalog) series.push(chartSeries('连续原型', frequencies.map((x) => ({ x, y: phase ? phaseDegreesAt(x, cutoffHz) : gainDbAt(x, cutoffHz) })), model === 'compare' ? CHART_COLORS.gray : CHART_COLORS.blue, {
+      lineStyle: { color: model === 'compare' ? CHART_COLORS.gray : CHART_COLORS.blue, width: 2.3, type: model === 'compare' ? 'dashed' : 'solid' },
+    }))
+    if (showDigital) series.push(chartSeries('数字 EMA', frequencies.map((x) => ({ x, y: phase ? discretePhaseDegreesAt(x, cutoffHz, sampleRateHz, method) : discreteGainDbAt(x, cutoffHz, sampleRateHz, method) }))))
+    const references = []
+    if (cutoffHz < maximum) references.push({ xAxis: cutoffHz, label: { formatter: 'fc' } })
+    if (showDigital) references.push({ xAxis: nyquist, label: { formatter: 'fN', position: 'insideEndTop', rotate: 0, align: 'right' } })
+    series[0].markLine = { silent: true, symbol: 'none', lineStyle: { color: '#aebbcf', type: 'dashed' }, label: { color: '#646464', fontSize: 11 }, data: references }
+    return { ...base,
+      grid: { top: 80, bottom: 64, left: 62, right: 22 },
+      xAxis: chartAxis({ type: 'log', min: minimum, max: maximum, name: '频率 f (Hz) · 对数刻度', nameLocation: 'middle', nameGap: 34,
+        axisLabel: { formatter: formatFrequency, fontSize: 11, hideOverlap: true } }),
+      yAxis: chartAxis({ max: 0, min: phase ? -90 : undefined, name: phase ? '相位 (°)' : '增益 (dB)', nameGap: 14,
+        axisLabel: { formatter: (v) => formatNumber(v, 2), fontSize: 11 } }),
+      tooltip: { ...base.tooltip, axisPointer: { type: 'cross', snap: false }, formatter: (params) => {
+        const f = Number(params[0]?.axisValue ?? minimum)
+        return [`f = ${formatFrequency(f)}`,
+          ...(showAnalog ? [`连续原型: ${formatNumber(phase ? phaseDegreesAt(f, cutoffHz) : gainDbAt(f, cutoffHz), 5)}${phase ? '°' : ' dB'}`] : []),
+          ...(showDigital ? [`数字 EMA: ${formatNumber(phase ? discretePhaseDegreesAt(f, cutoffHz, sampleRateHz, method) : discreteGainDbAt(f, cutoffHz, sampleRateHz, method), 5)}${phase ? '°' : ' dB'}`] : []),
+        ].join('<br/>')
+      } }, series,
+    }
+  }, [alpha, axisMode, cutoffHz, digital, duration, method, model, nyquist, sampleRateHz, showAnalog, showDigital, tau, view, yMode])
+
+  const initialCoordinate = view === 'step' ? axis.fromSeconds(Math.min(tau, duration / 2)) : model === 'analog' ? cutoffHz : Math.min(cutoffHz, nyquist * 0.8)
+  const coordinate = cursor?.context === context ? cursor.value : initialCoordinate
+  const time = Math.max(0, Math.min(duration, axis.toSeconds(coordinate)))
+  const sampleIndex = Math.min(digital.sampleCount - 1, Math.max(0, Math.round(time * sampleRateHz)))
+  const displayOutput = (value) => yMode === 'percent' ? formatPercent(value, 3) : formatNumber(value, 6)
+  const readouts = view === 'step' ? [
+    { label: '时间 t', value: formatSeconds(time) },
+    ...(showAnalog ? [{ label: '连续 y(t)', value: displayOutput(continuousStepValue(time, cutoffHz)) }] : []),
+    ...(showDigital ? [{ label: '数字 y[n]', value: displayOutput(digitalStepValue(sampleIndex, alpha)), detail: `n=${formatInteger(sampleIndex)} · t[n]=${formatSeconds(sampleIndex / sampleRateHz)}` }] : []),
+    { label: 't/τ', value: formatNumber(time / tau, 4), detail: '无量纲' },
+  ] : [
+    { label: '频率 f', value: formatFrequency(coordinate) },
+    ...(showAnalog ? [{ label: '连续原型', value: view === 'phase' ? `${formatNumber(phaseDegreesAt(coordinate, cutoffHz), 3)}°` : `${formatNumber(gainDbAt(coordinate, cutoffHz), 3)} dB` }] : []),
+    ...(showDigital ? [{ label: '数字 EMA', value: view === 'phase' ? `${formatNumber(discretePhaseDegreesAt(coordinate, cutoffHz, sampleRateHz, method), 3)}°` : `${formatNumber(discreteGainDbAt(coordinate, cutoffHz, sampleRateHz, method), 3)} dB` }] : []),
   ]
+  const updates95 = discreteSettlingSamples(cutoffHz, sampleRateHz, method, 0.95)
+  const updates99 = discreteSettlingSamples(cutoffHz, sampleRateHz, method, 0.99)
 
-  return (
-    <section className="content-section">
-      <SectionIntro
-        eyebrow="02 · 连续原型响应"
-        title="用 H(s) 同时观察阶跃、幅频与相频"
-        description="本页三张图严格对应连续一阶原型 H(s)=1/(1+τs)，只由 fc 决定；fs、α 与离散方法不会混入这些曲线。"
-        aside={<><CircleHelp size={18} />模拟原型 · 先找橙色参考线</>}
-      />
-
-      <div className="response-summary-grid">
-        <article className="summary-card">
-          <Timer size={20} />
-          <span>达到 95%</span>
-          <strong>{formatSeconds(time95)}</strong>
-          <small>严格值约 2.996τ，工程上常记 3τ</small>
-        </article>
-        <article className="summary-card">
-          <Activity size={20} />
-          <span>达到 99%</span>
-          <strong>{formatSeconds(time99)}</strong>
-          <small>严格值约 4.605τ，工程上常记 5τ</small>
-        </article>
-        <article className="summary-card">
-          <Gauge size={20} />
-          <span>fc 处幅值</span>
-          <strong>{formatPercent(magnitudeAt(cutoffHz, cutoffHz), 1)}</strong>
-          <small>也就是 −3.01 dB</small>
-        </article>
-        <article className="summary-card">
-          <MoveDownRight size={20} />
-          <span>fc 处相位</span>
-          <strong>{formatNumber(phaseDegreesAt(cutoffHz, cutoffHz), 0)}°</strong>
-          <small>输出相对输入向后错开</small>
-        </article>
-      </div>
-
-      <article className="chart-card chart-card-featured">
-        <div className="chart-card-heading">
-          <div><span className="chart-index">A</span><div><h3>阶跃响应</h3><p>输入突然从 0 跳到 1，输出会按指数曲线追上去。</p></div></div>
-          <code>y(t) = 1 − e<sup>−t/τ</sup></code>
-        </div>
-        <LineChart
-          series={[{ label: '输出 y(t)', color: '#0aa39a', data: stepData }]}
-          xDomain={[0, tau * 5]}
-          yDomain={[0, 1.05]}
-          xTicks={[0, tau, tau * 2, tau * 3, tau * 4, tau * 5]}
-          yTicks={[0, 0.25, 0.5, 0.632, 0.75, 1]}
-          formatX={(value) => formatTauPosition(value, tau)}
-          formatY={(value) => formatPercent(value, 0)}
-          referenceLines={[
-            { axis: 'x', value: tau, label: '63.2%', color: '#f29a4a' },
-            { axis: 'x', value: tau * 3, label: '≈ 95%', color: '#d7f56d' },
-          ]}
-          ariaLabel="一阶低通滤波器的单位阶跃响应曲线"
-        />
-        <div className="chart-takeaway">
-          <span>读图结论</span>
-          <p>横轴每一格都是 <strong>1τ</strong>（当前为 {formatSeconds(tau)}）；到 <strong>3τ ≈ {formatSeconds(time95)}</strong> 时，输出已经“基本跟上”。</p>
-        </div>
-      </article>
-
-      <div className="chart-pair">
-        <article className="chart-card magnitude-card">
-          <div className="chart-card-heading compact">
-            <div><span className="chart-index">B</span><div><h3>幅频响应</h3><p>每种频率最后还剩多少幅值。</p></div></div>
-            <aside className="db-formula-panel" aria-label="分贝与幅值倍数换算公式">
-              <span>幅值比 ↔ dB</span>
-              <code>G<sub>dB</sub> = 20 log<sub>10</sub>|H|</code>
-              <code>|H| = 10<sup>G<sub>dB</sub>/20</sup></code>
-              <small>功率比使用 10 log<sub>10</sub>(P<sub>out</sub>/P<sub>in</sub>)</small>
-            </aside>
-          </div>
-          <LineChart
-            series={gainSeries}
-            xDomain={[cutoffHz / 100, cutoffHz * 100]}
-            yDomain={[-42, 1]}
-            xTicks={frequencyTicks}
-            yTicks={[-40, -30, -20, -10, -3.01, 0]}
-            xScale="log"
-            formatX={(value) => `${formatNumber(value / cutoffHz, 2)}×fc`}
-            formatY={(value) => `${formatNumber(value, 1)} dB`}
-            referenceLines={[{ axis: 'x', value: cutoffHz, label: 'fc', color: '#f29a4a' }]}
-            pointAnnotations={magnitudeAnnotations}
-            ariaLabel="一阶低通滤波器的幅频响应曲线"
-          />
-          <div className="db-conversion-strip" aria-label="常见分贝与倍数换算">
-            <div>
-              <code>−3 dB</code>
-              <strong>幅值 ≈ 0.707</strong>
-              <small>功率 ≈ 1/2</small>
-            </div>
-            <div>
-              <code>−20 dB</code>
-              <strong>幅值 ≈ 1/10</strong>
-              <small>功率 ≈ 1/100</small>
-            </div>
-            <div>
-              <code>−40 dB</code>
-              <strong>幅值 ≈ 1/100</strong>
-              <small>功率 ≈ 1/10,000</small>
-            </div>
-          </div>
-          <p className="under-chart-note"><strong>过了 fc 以后：</strong>频率每提高 10 倍，幅值约下降 20 dB，也就是变为前一档的约 <strong>1/10</strong>；对应功率约变为 <strong>1/100</strong>。</p>
-        </article>
-
-        <article className="chart-card">
-          <div className="chart-card-heading compact">
-            <div><span className="chart-index">C</span><div><h3>相频响应</h3><p>输出相对输入晚了多少角度。</p></div></div>
-            <code>φ = −atan(f/fc)</code>
-          </div>
-          <LineChart
-            series={phaseSeries}
-            xDomain={[cutoffHz / 100, cutoffHz * 100]}
-            yDomain={[-92, 2]}
-            xTicks={frequencyTicks}
-            yTicks={[-90, -75, -60, -45, -30, -15, 0]}
-            xScale="log"
-            formatX={(value) => `${formatNumber(value / cutoffHz, 2)}×fc`}
-            formatY={(value) => `${formatNumber(value, 0)}°`}
-            referenceLines={[{ axis: 'x', value: cutoffHz, label: 'fc', color: '#f29a4a' }]}
-            ariaLabel="一阶低通滤波器的相频响应曲线"
-          />
-          <p className="under-chart-note"><strong>别把它当固定延时：</strong>不同频率的相位滞后不同，只有单一正弦才能换算等效时间。</p>
-        </article>
-      </div>
-    </section>
-  )
+  return <div className="result-stack analysis-results" id="analysis-results">
+    <article className="panel analysis-panel">
+      <header className="panel-title"><h2>响应曲线</h2><div className="analysis-model-control"><label>模型 <select aria-label="分析模型" value={model} onChange={(event) => setModel(event.target.value)}>{MODELS.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
+        <button type="button" className="icon-button" aria-label="重置图表设置" title="恢复默认图表设置" onClick={resetChart}><RotateCcw size={15} /></button></div></header>
+      <Segments label="响应曲线" value={view} onChange={setView} items={VIEWS} />
+      {view === 'step' ? <div className="analysis-axis-controls">
+        <div><span>横轴</span><Segments label="时间轴模式" value={axisMode} onChange={setAxisMode} items={[{ id: 'physical', label: '真实时间' }, { id: 'normalized', label: 't/τ' }]} /></div>
+        <label className="compact-select">纵轴 <select aria-label="阶跃纵轴显示" value={yMode} onChange={(event) => setYMode(event.target.value)}><option value="amplitude">幅值</option><option value="percent">百分比</option></select></label>
+        <div className="window-control"><span>时间窗</span><Segments label="阶跃时间窗模式" value={windowMode} onChange={changeWindow} items={[{ id: 'auto', label: '自动' }, { id: 'fixed', label: '固定' }]} />
+          <EngineeringTimeInput key={resetId} valueSeconds={duration} minimumSeconds={1e-12} maximumSeconds={1_000_000} ariaLabel="阶跃时间窗" onChange={(value) => { setFixedDuration(value); setWindowMode('fixed') }} /></div>
+      </div> : <p className="analysis-frequency-context">{showDigital ? `数字频带：0 < f ≤ ${formatFrequency(nyquist)}；当前 ${method === 'zoh' ? '极点匹配' : '后向欧拉'}。` : '连续原型 H(s) = 1 / (1 + τs)，频率范围 0.01fc～100fc。'}</p>}
+      <Plot key={resetId} className="response-plot" option={option} onCursor={onCursor} label={`${MODELS.find((item) => item.id === model).label}${VIEWS.find((item) => item.id === view).label}，${view === 'step' ? axis.label : '频率单位 Hz'}`} />
+      <section className="measurement-strip" aria-label="响应读数"><span>{cursor?.context === context ? '游标读数' : '参考读数'}</span><dl className="cursor-readout">{readouts.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd>{item.detail ? <small>{item.detail}</small> : null}</div>)}</dl></section>
+      <p className="chart-footnote">{view === 'step' ? `${windowMode === 'auto' ? '自动范围约 5τ' : '固定时间窗不随 fc 改变'} · ${formatSeconds(duration)}。${showAnalog ? '参考线：连续原型 τ、t95、t99。' : ''}${showDigital ? `数字初始 y[−1]=0，首样本在 t=0 更新；${digital.decimated ? `解析采样时刻抽取 ${formatInteger(digital.data.length)} 点绘图` : `显示 ${formatInteger(digital.sampleCount)} 个采样时刻`}。` : '输入为 0→1 单位阶跃。'}` : '幅值比按 20log₁₀|H| 换算 dB；数字相位对应当前输入 EMA，严格 ZOH 另有一采样延时。'}</p>
+    </article>
+    <article className="panel model-characteristics"><header className="panel-title"><h2>模型特征</h2><span className="muted">fc {formatFrequency(cutoffHz)} · fs {formatFrequency(sampleRateHz)}</span></header>
+      <div className="table-scroll"><table><thead><tr><th>指标</th><th>连续原型 H(s)</th><th>数字 EMA · {method === 'zoh' ? '极点匹配' : '后向欧拉'}</th></tr></thead><tbody>
+        <tr><th>时间常数 / 等效 τ</th><td>{formatSeconds(tau)}</td><td>{formatSeconds(discreteTimeConstantSeconds(cutoffHz, sampleRateHz, method))}</td></tr>
+        <tr><th>首次达到 95%</th><td>{formatSeconds(-tau * Math.log(0.05))}</td><td>{formatSeconds((updates95 - 1) / sampleRateHz)}<small>{formatInteger(updates95)} 次更新 · 预算 {formatSeconds(updates95 / sampleRateHz)}</small></td></tr>
+        <tr><th>首次达到 99%</th><td>{formatSeconds(-tau * Math.log(0.01))}</td><td>{formatSeconds((updates99 - 1) / sampleRateHz)}<small>{formatInteger(updates99)} 次更新 · 预算 {formatSeconds(updates99 / sampleRateHz)}</small></td></tr>
+        <tr><th>半功率截止频率</th><td>{formatFrequency(cutoffHz)}</td><td>{digitalCutoff === null ? '基带内未达 −3.0103 dB' : formatFrequency(digitalCutoff)}</td></tr>
+      </tbody></table></div>
+    </article>
+    <details className="panel calculation-details"><summary>频率参考点与时序说明</summary><div className="table-scroll"><table><thead><tr><th>频率</th><th>连续幅值 / 相位</th><th>数字幅值 / 相位</th></tr></thead><tbody>{[0.1, 1, 10, 100].map((ratio) => <tr key={ratio}><th>{formatFrequency(ratio * cutoffHz)}<small>{ratio} × fc</small></th><td>{formatPercent(magnitudeAt(ratio * cutoffHz, cutoffHz), 2)} / {formatNumber(phaseDegreesAt(ratio * cutoffHz, cutoffHz), 2)}°</td><td>{ratio * cutoffHz <= nyquist ? `${formatPercent(discreteMagnitudeAt(ratio * cutoffHz, cutoffHz, sampleRateHz, method), 2)} / ${formatNumber(discretePhaseDegreesAt(ratio * cutoffHz, cutoffHz, sampleRateHz, method), 2)}°` : '超出数字基带'}</td></tr>)}</tbody></table></div>
+      <p>数字首个输出 y[0] 位于 t=0，已完成第一次更新。N 次更新的首次达标样本在 (N−1)Ts，更新预算为 NTs。归一化时间轴只改变坐标表达；固定时间窗保持物理时长。</p>
+    </details>
+    {showDigital && cutoffHz >= nyquist ? <Notice warning>fc 是系数映射参数，当前已不在严格数字基带内。应以实际数字响应与半功率截止判定，不将 fc 当作数字滤波的真实截止点。</Notice> : null}
+  </div>
 }

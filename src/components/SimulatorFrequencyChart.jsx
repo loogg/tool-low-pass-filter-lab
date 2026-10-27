@@ -1,252 +1,34 @@
-import { useMemo } from 'react'
-import EChartCanvas from './EChartCanvas.jsx'
-import { formatFrequency, formatNumber } from '../lib/format.js'
+import { useMemo, useState } from 'react'
+import Plot from './Plot.jsx'
+import { Segments } from './LabUI.jsx'
+import { baseChartOption, chartAxis, chartSeries, CHART_COLORS } from '../lib/chartTheme.js'
+import { discreteGainDbAt, discretePhaseDegreesAt, gainDbAt, phaseDegreesAt } from '../lib/filterMath.js'
+import { formatFrequency } from '../lib/format.js'
 
-const GAIN_COLOR = '#d7f56d'
-const PHASE_COLOR = '#19c8c1'
-const CUTOFF_COLOR = '#ff9b52'
-
-function toPairs(points) {
-  return points.map((point) => [point.x, point.y])
-}
-
-function tooltipFormatter(params) {
-  const values = Array.isArray(params) ? params : [params]
-  const frequency = values[0]?.axisValue ?? 0
-  const rows = values.map((item) => {
-    const value = Array.isArray(item.value) ? item.value[1] : item.value
-    const suffix = item.seriesId === 'gain-response' ? ' dB' : '°'
-    return `
-      <div class="echart-tooltip-row">
-        <i style="background:${item.color}"></i>
-        <span>${item.seriesName}</span>
-        <strong>${formatNumber(value, 4)}${suffix}</strong>
-      </div>
-    `
-  }).join('')
-  return `<div class="echart-tooltip"><header>f = ${formatFrequency(Number(frequency))}</header>${rows}</div>`
-}
-
-export default function SimulatorFrequencyChart({
-  response,
-  cutoffHz,
-  measurementFrequencyHz,
-  measurementLabel,
-  gainDb,
-  phase,
-}) {
+export default function SimulatorFrequencyChart({ cutoffHz, sampleRateHz, method, aliasHz }) {
+  const [view, setView] = useState('magnitude')
   const option = useMemo(() => {
-    const gainData = toPairs(response.gain)
-    const phaseData = toPairs(response.phase)
-    const references = []
-    if (cutoffHz >= response.domain[0] && cutoffHz <= response.domain[1]) {
-      references.push({
-        name: 'fc',
-        xAxis: cutoffHz,
-        lineStyle: { color: CUTOFF_COLOR, width: 1.4, type: 'dashed' },
-        label: { color: CUTOFF_COLOR, formatter: 'fc', position: 'insideEndTop' },
-      })
+    const nyquist = sampleRateHz / 2
+    const minimum = Math.min(cutoffHz / 100, nyquist / 1000)
+    const frequencies = Array.from({ length: 301 }, (_, i) => minimum * (nyquist / minimum) ** (i / 300))
+    const phase = view === 'phase'
+    const digital = frequencies.map((x) => ({ x, y: phase ? discretePhaseDegreesAt(x, cutoffHz, sampleRateHz, method) : discreteGainDbAt(x, cutoffHz, sampleRateHz, method) }))
+    const analog = frequencies.map((x) => ({ x, y: phase ? phaseDegreesAt(x, cutoffHz) : gainDbAt(x, cutoffHz) }))
+    const markers = [{ xAxis: nyquist, label: { formatter: 'fN', position: 'insideEndTop', rotate: 0, align: 'right' } }]
+    if (cutoffHz < nyquist && cutoffHz > minimum) markers.push({ xAxis: cutoffHz, label: { formatter: 'fc' } })
+    const measurement = aliasHz > minimum && aliasHz < nyquist ? {
+      symbol: 'circle', symbolSize: 7,
+      data: [{ coord: [aliasHz, phase ? discretePhaseDegreesAt(aliasHz, cutoffHz, sampleRateHz, method) : discreteGainDbAt(aliasHz, cutoffHz, sampleRateHz, method)] }],
+      label: { show: true, formatter: 'f_alias', position: 'left', color: CHART_COLORS.blue, fontSize: 10 },
+    } : undefined
+    return { ...baseChartOption(),
+      xAxis: chartAxis({ type: 'log', min: minimum, max: nyquist, axisLabel: { formatter: formatFrequency, fontSize: 11, hideOverlap: true } }),
+      yAxis: chartAxis({ max: 0, min: phase ? -90 : undefined, axisLabel: { formatter: (v) => `${v}${phase ? '°' : ' dB'}`, fontSize: 11 } }),
+      series: [chartSeries(phase ? '数字相位' : '数字增益', digital, CHART_COLORS.blue, { markPoint: measurement, markLine: { silent: true, symbol: 'none', lineStyle: { color: '#aebbcf', type: 'dashed' }, label: { color: '#646464', fontSize: 11 }, data: markers } }),
+        chartSeries('连续原型参考', analog, CHART_COLORS.gray, { lineStyle: { color: CHART_COLORS.gray, width: 1.5, type: 'dashed' } })],
     }
-    if (measurementFrequencyHz > 0 && Math.abs(measurementFrequencyHz - cutoffHz) / cutoffHz > 0.015) {
-      references.push({
-        name: 'measurement',
-        xAxis: measurementFrequencyHz,
-        lineStyle: { color: GAIN_COLOR, width: 1.3, type: 'dashed' },
-        label: {
-          color: GAIN_COLOR,
-          formatter: measurementLabel.replace('@ ', ''),
-          position: 'insideEndBottom',
-        },
-      })
-    }
-
-    return {
-      backgroundColor: 'transparent',
-      animationDuration: 300,
-      animationDurationUpdate: 180,
-      aria: {
-        show: true,
-        description: '当前数字一阶低通滤波器的幅值分贝与相位双轴频率响应图。',
-      },
-      color: [GAIN_COLOR, PHASE_COLOR],
-      legend: {
-        type: 'scroll',
-        top: 12,
-        left: 15,
-        itemWidth: 20,
-        itemHeight: 8,
-        itemGap: 20,
-        selectedMode: true,
-        textStyle: { color: '#91aaa3', fontSize: 11 },
-        inactiveColor: '#3f5d57',
-        pageIconColor: GAIN_COLOR,
-        pageIconInactiveColor: '#3f5d57',
-        pageTextStyle: { color: '#7f9c94', fontSize: 9 },
-      },
-      toolbox: {
-        show: true,
-        top: 6,
-        right: 10,
-        itemSize: 15,
-        iconStyle: { borderColor: '#789a91' },
-        emphasis: { iconStyle: { borderColor: GAIN_COLOR } },
-        feature: {
-          dataZoom: { yAxisIndex: 'none', title: { zoom: '框选频段', back: '返回缩放' } },
-          restore: { title: '恢复视图' },
-          saveAsImage: { name: 'LPF-幅相响应', backgroundColor: '#052526', title: '导出图片' },
-        },
-      },
-      tooltip: {
-        trigger: 'axis',
-        confine: true,
-        appendToBody: false,
-        axisPointer: {
-          type: 'cross',
-          snap: false,
-          lineStyle: { color: 'rgba(215,245,109,0.48)', width: 1 },
-          crossStyle: { color: 'rgba(215,245,109,0.42)', width: 1 },
-          label: { color: '#082829', backgroundColor: GAIN_COLOR, fontSize: 10 },
-        },
-        padding: 0,
-        borderWidth: 0,
-        backgroundColor: 'transparent',
-        formatter: tooltipFormatter,
-      },
-      grid: {
-        top: 64,
-        right: 70,
-        bottom: 66,
-        left: 68,
-      },
-      xAxis: {
-        type: 'log',
-        logBase: 10,
-        min: response.domain[0],
-        max: response.domain[1],
-        axisLine: { lineStyle: { color: '#42645d' } },
-        axisTick: { show: false },
-        minorTick: { show: true, splitNumber: 4, lineStyle: { color: '#385951' } },
-        axisLabel: {
-          color: '#6f8e86',
-          fontSize: 10,
-          hideOverlap: true,
-          formatter: (value) => formatFrequency(value),
-        },
-        splitLine: { show: true, lineStyle: { color: 'rgba(170,206,196,0.13)', type: 'dashed' } },
-        minorSplitLine: { show: true, lineStyle: { color: 'rgba(170,206,196,0.045)' } },
-      },
-      yAxis: [
-        {
-          type: 'value',
-          name: 'MAGNITUDE / dB',
-          nameTextStyle: { color: GAIN_COLOR, fontSize: 9, padding: [0, 0, 4, 0] },
-          min: response.gainDomain[0],
-          max: response.gainDomain[1],
-          position: 'left',
-          axisLine: { show: true, lineStyle: { color: 'rgba(215,245,109,0.38)' } },
-          axisTick: { show: false },
-          axisLabel: { color: GAIN_COLOR, fontSize: 10, formatter: (value) => `${formatNumber(value, 0)} dB` },
-          splitLine: { show: true, lineStyle: { color: 'rgba(170,206,196,0.12)', type: 'dashed' } },
-          splitArea: {
-            show: true,
-            areaStyle: { color: ['rgba(255,255,255,0.010)', 'rgba(10,163,154,0.014)'] },
-          },
-        },
-        {
-          type: 'value',
-          name: 'PHASE / °',
-          nameTextStyle: { color: PHASE_COLOR, fontSize: 9, padding: [0, 0, 4, 0] },
-          min: -92,
-          max: 2,
-          position: 'right',
-          axisLine: { show: true, lineStyle: { color: 'rgba(25,200,193,0.42)' } },
-          axisTick: { show: false },
-          axisLabel: { color: PHASE_COLOR, fontSize: 10, formatter: (value) => `${formatNumber(value, 0)}°` },
-          splitLine: { show: false },
-        },
-      ],
-      dataZoom: [
-        { type: 'inside', xAxisIndex: 0, filterMode: 'none' },
-        {
-          type: 'slider',
-          xAxisIndex: 0,
-          height: 18,
-          bottom: 15,
-          borderColor: 'rgba(215,245,109,0.12)',
-          backgroundColor: 'rgba(0,0,0,0.16)',
-          fillerColor: 'rgba(10,163,154,0.18)',
-          dataBackground: {
-            lineStyle: { color: '#547971' },
-            areaStyle: { color: 'rgba(84,121,113,0.15)' },
-          },
-          selectedDataBackground: {
-            lineStyle: { color: GAIN_COLOR },
-            areaStyle: { color: 'rgba(215,245,109,0.10)' },
-          },
-          handleStyle: { color: '#0d4b49', borderColor: GAIN_COLOR },
-          moveHandleStyle: { color: '#789a91' },
-          textStyle: { color: '#7f9c94', fontSize: 9 },
-        },
-      ],
-      series: [
-        {
-          id: 'gain-response',
-          name: '幅值 / dB',
-          type: 'line',
-          yAxisIndex: 0,
-          data: gainData,
-          showSymbol: false,
-          smooth: 0.18,
-          sampling: 'lttb',
-          lineStyle: { color: GAIN_COLOR, width: 3 },
-          itemStyle: { color: GAIN_COLOR },
-          areaStyle: { color: 'rgba(215,245,109,0.045)' },
-          emphasis: { focus: 'series', lineStyle: { width: 4 } },
-          markLine: {
-            silent: true,
-            symbol: 'none',
-            data: references,
-          },
-          markPoint: measurementFrequencyHz > 0 ? {
-            symbol: 'circle',
-            symbolSize: 10,
-            itemStyle: { color: GAIN_COLOR, borderColor: '#052728', borderWidth: 2 },
-            label: { show: false },
-            data: [{ coord: [measurementFrequencyHz, gainDb], name: '当前幅值' }],
-          } : undefined,
-          z: 4,
-        },
-        {
-          id: 'phase-response',
-          name: '相位 / °',
-          type: 'line',
-          yAxisIndex: 1,
-          data: phaseData,
-          showSymbol: false,
-          smooth: 0.18,
-          sampling: 'lttb',
-          lineStyle: { color: PHASE_COLOR, width: 2.5 },
-          itemStyle: { color: PHASE_COLOR },
-          emphasis: { focus: 'series', lineStyle: { width: 3.5 } },
-          markPoint: measurementFrequencyHz > 0 ? {
-            symbol: 'circle',
-            symbolSize: 9,
-            itemStyle: { color: PHASE_COLOR, borderColor: '#052728', borderWidth: 2 },
-            label: { show: false },
-            data: [{ coord: [measurementFrequencyHz, phase], name: '当前相位' }],
-          } : undefined,
-          z: 5,
-        },
-      ],
-    }
-  }, [cutoffHz, gainDb, measurementFrequencyHz, measurementLabel, phase, response])
-
-  return (
-    <div className="echart-analysis-frame frequency-analysis-chart">
-      <EChartCanvas
-        option={option}
-        ariaLabel="数字低通滤波器幅值分贝与相位的双轴交互频率响应图"
-      />
-    </div>
-  )
+  }, [aliasHz, cutoffHz, method, sampleRateHz, view])
+  return <><Segments label="数字响应类型" value={view} onChange={setView} items={[{ id: 'magnitude', label: '幅频' }, { id: 'phase', label: '相频' }]} />
+    <Plot option={option} label={`数字滤波器与连续原型的${view === 'phase' ? '相频' : '幅频'}对比图`} />
+    <p className="chart-footnote">只绘制 0 &lt; f ≤ fs/2。数字相位以正频率基带为参考，严格 ZOH 还会额外滞后一个采样周期。</p></>
 }

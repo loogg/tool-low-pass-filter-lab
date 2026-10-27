@@ -1,96 +1,38 @@
-import { Check, Clipboard, Code2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { alphaBackwardEuler, alphaForMethod, alphaZoh, nyquistFrequency, tauFromCutoff } from '../lib/filterMath.js'
-import {
-  formatCFloatLiteral,
-  formatFrequency,
-  formatNumber,
-  formatSeconds,
-} from '../lib/format.js'
-import SectionIntro from './SectionIntro.jsx'
+import { Check, Clipboard, Code2 } from 'lucide-react'
+import { Metrics, Notice, NumberField, Segments } from './LabUI.jsx'
+import { alphaBackwardEuler, alphaForMethod, alphaZoh } from '../lib/filterMath.js'
+import { generateFilterCode } from '../lib/codegen.js'
+import { formatFrequency, formatNumber } from '../lib/format.js'
 
 export default function CodePanel({ cutoffHz, sampleRateHz, method }) {
-  const [copied, setCopied] = useState(false)
-  const tau = tauFromCutoff(cutoffHz)
+  const [precision, setPrecision] = useState('double')
+  const [initialOutput, setInitialOutput] = useState(0)
+  const [copyStatus, setCopyStatus] = useState('')
+  const code = useMemo(() => generateFilterCode({ cutoffHz, sampleRateHz, method, precision, initialOutput }), [cutoffHz, sampleRateHz, method, precision, initialOutput])
   const alpha = alphaForMethod(cutoffHz, sampleRateHz, method)
-  const zohAlpha = alphaZoh(cutoffHz, sampleRateHz)
-  const backwardAlpha = alphaBackwardEuler(cutoffHz, sampleRateHz)
-  const nyquist = nyquistFrequency(sampleRateHz)
-  const methodLabel = method === 'zoh' ? 'ZOH exact discretization' : 'Backward Euler discretization'
-  const code = useMemo(
-    () => `#include <stdbool.h>
-
-typedef struct {
-    float y;
-    float alpha;
-    bool initialized;
-} lpf1_t;
-
-static inline void lpf1_init(lpf1_t *f)
-{
-    /* fc = ${cutoffHz.toFixed(4)} Hz, fs = ${sampleRateHz.toFixed(2)} Hz */
-    /* Nyquist fN = ${nyquist.toFixed(4)} Hz. Band-limit the analog input before ADC. */
-    /* ${methodLabel} */
-    f->alpha = ${formatCFloatLiteral(alpha)};
-    f->y = 0.0f;
-    f->initialized = false;
-}
-
-static inline float lpf1_update(lpf1_t *f, float x)
-{
-    if (!f->initialized) {
-        f->y = x;
-        f->initialized = true;
-        return x;
-    }
-
-    f->y += f->alpha * (x - f->y);
-    return f->y;
-}`,
-    [cutoffHz, sampleRateHz, nyquist, methodLabel, alpha],
-  )
-
+  const copied = copyStatus === code
   async function copyCode() {
-    await navigator.clipboard.writeText(code)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1600)
+    try { await navigator.clipboard.writeText(code); setCopyStatus(code) }
+    catch { setCopyStatus('failed') }
   }
-
-  return (
-    <section className="content-section">
-      <SectionIntro
-        eyebrow="05 · 落到代码"
-        title="最后 MCU 真正执行的，仍然只有一行"
-        description="固定采样周期时，α 在初始化阶段算一次即可。实时更新只做一次减法、一次乘法和一次加法。"
-        aside={<><Code2 size={18} />可直接复制</>}
-      />
-
-      <div className="code-layout">
-        <article className="code-card">
-          <div className="code-toolbar">
-            <div><span className="code-dot red" /><span className="code-dot amber" /><span className="code-dot green" /><strong>lpf1.h</strong></div>
-            <button type="button" onClick={copyCode}>{copied ? <Check size={17} /> : <Clipboard size={17} />}{copied ? '已复制' : '复制代码'}</button>
-          </div>
-          <pre><code>{code}</code></pre>
-        </article>
-
-        <aside className="code-explainer">
-          <div className="one-line-code"><span>核心递推</span><code>y += α × (x − y)</code></div>
-          <ol>
-            <li><span>01</span><div><strong>x − y</strong><p>先算输入与当前输出还差多少。</p></div></li>
-            <li><span>02</span><div><strong>乘以 α</strong><p>这次只走完整差值的一小步。</p></div></li>
-            <li><span>03</span><div><strong>加回 y</strong><p>输出平滑地向输入靠近。</p></div></li>
-          </ol>
-          <div className="method-comparison">
-            <h3>两种 α 对照</h3>
-            <div className={method === 'zoh' ? 'is-selected' : ''}><span>ZOH 精确</span><strong>{formatNumber(zohAlpha, 7)}</strong></div>
-            <div className={method === 'backward-euler' ? 'is-selected' : ''}><span>后向欧拉</span><strong>{formatNumber(backwardAlpha, 7)}</strong></div>
-            <p>当前 τ = {formatSeconds(tau)}。当 fs ≫ fc 时，两种结果会很接近。</p>
-          </div>
-          <div className="engineering-note"><strong>启动注意</strong><p>第一次采样让 y = x，可避免从 0 开始产生不必要的启动过渡。</p></div>
-          <div className="engineering-note is-warning"><strong>采样链路注意</strong><p>当前 fN = {formatFrequency(nyquist)}。这段代码运行在 ADC 之后，无法撤销已经折回的频率；模拟抗混叠滤波器必须放在 ADC 之前。</p></div>
-        </aside>
-      </div>
-    </section>
-  )
+  return <div className="result-stack">
+    <article className="panel code-options"><header className="panel-title"><h2>实现配置</h2><Code2 size={20} /></header>
+      <div className="code-settings"><div><span className="field-title">数值类型</span><Segments label="C 代码数值类型" value={precision} onChange={setPrecision} items={[{ id: 'double', label: 'double' }, { id: 'float', label: 'float' }]} /></div><NumberField label="初始状态 y[−1]" value={initialOutput} min={-1_000_000} max={1_000_000} onChange={setInitialOutput} /></div>
+    </article>
+    <article className="code-card"><div className="code-toolbar"><span><span className="blue-dot" />lpf1.h <small>C99</small></span><button type="button" onClick={copyCode}>{copied ? <Check size={15} /> : <Clipboard size={15} />}{copied ? '已复制' : '复制代码'}</button></div><pre tabIndex="0" aria-label="可复制的低通滤波 C 代码"><code>{code}</code></pre></article>
+    <span role="status" className={copyStatus === 'failed' ? 'copy-error' : 'sr-only'}>{copyStatus === 'failed' ? '剪贴板不可用，请选中上面的代码手动复制。' : copied ? '代码已复制到剪贴板' : ''}</span>
+    <Metrics items={[
+      { label: '极点匹配 α', value: formatNumber(alphaZoh(cutoffHz, sampleRateHz), 8), detail: method === 'zoh' ? '当前采用' : '用于对比' },
+      { label: '后向欧拉 α', value: formatNumber(alphaBackwardEuler(cutoffHz, sampleRateHz), 8), detail: method === 'backward-euler' ? '当前采用' : '用于对比' },
+      { label: '每采样计算', value: '1 乘 + 2 加减', detail: '运算数不等于目标 CPU 周期' },
+    ]} />
+    <article className="panel implementation-notes"><h3>实现约定</h3><ol>
+      <li><strong>固定周期调用。</strong><p>每收到一个采样值调用一次 update，当前 fs = {formatFrequency(sampleRateHz)}。采样间隔变化时需重新计算系数。</p></li>
+      <li><strong>让初始化与实验一致。</strong><p>默认 y[−1] = 0，首样本立即参与滤波。如需首样本启动，可先将状态设为 x[0]，这会改变启动过渡。</p></li>
+      <li><strong>按目标处理器选择精度。</strong><p>浏览器使用双精度。float 的舍入可能使极小更新停滞；确认编译器的 double 位宽，并实测误差与运行周期。</p></li>
+    </ol></article>
+    {precision === 'float' && (Math.fround(1 - alpha) === 1 || alpha > 1 - 1e-7) ? <Notice warning>当前 α 接近 float 的精度边界。系数字面量仍会输出，但单精度递推可能停滞或趋近直通，请用 double 验证后再移植。</Notice> : null}
+    <Notice>这段代码运行在采样之后，不能恢复已经混叠的信号。实际系统的抗混叠滤波应位于 ADC 之前。</Notice>
+  </div>
 }
